@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { BottomToolbar } from './components/BottomToolbar.js';
 import { DebugView } from './components/DebugView.js';
@@ -8,6 +8,8 @@ import { useEditorActions } from './hooks/useEditorActions.js';
 import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
 import { useExtensionMessages } from './hooks/useExtensionMessages.js';
 import { OfficeCanvas } from './office/components/OfficeCanvas.js';
+import { DEFAULT_AREA_LABELS, FLOOR2_AREA_LABELS, FLOOR3_AREA_LABELS } from './office/engine/renderer.js';
+import type { AreaLabel } from './office/engine/renderer.js';
 import { ToolOverlay } from './office/components/ToolOverlay.js';
 import { EditorState } from './office/editor/editorState.js';
 import { EditorToolbar } from './office/editor/EditorToolbar.js';
@@ -26,6 +28,220 @@ function getOfficeState(): OfficeState {
     officeStateRef.current = new OfficeState();
   }
   return officeStateRef.current;
+}
+
+// ── Hired Agents Store (Paperclip) ──────────────────────────────────────────
+interface HiredAgent {
+  id: string;
+  name: string;
+  role: string;
+  dept: string;
+  status: string;
+  hireDate: string;
+  zone?: string;
+  pixelCharId?: number;
+}
+
+const hiredAgentsStore: HiredAgent[] = [];
+let hiredAgentsListeners: (() => void)[] = [];
+
+function addHiredAgent(agent: HiredAgent) {
+  hiredAgentsStore.push(agent);
+  hiredAgentsListeners.forEach(l => l());
+}
+
+function removeHiredAgent(id: string) {
+  const idx = hiredAgentsStore.findIndex(a => a.id === id);
+  if (idx >= 0) hiredAgentsStore.splice(idx, 1);
+  hiredAgentsListeners.forEach(l => l());
+}
+
+const STATUSES = ['Working', 'Working', 'Working', 'Idle', 'In Meeting', 'On Break'];
+const STATUS_ZONES: Record<string, string> = {
+  'Working':    'workspace',
+  'Idle':       'workspace',
+  'In Meeting': 'workspace',   // meeting in working area on ground floor
+  'On Break':   'cafeteria',   // break → lounge (right room)
+};
+
+function randomStatus() {
+  return STATUSES[Math.floor(Math.random() * STATUSES.length)];
+}
+
+// Rotate statuses every 10 seconds + update agent zone
+setInterval(() => {
+  hiredAgentsStore.forEach(a => {
+    if (Math.random() < 0.35) {
+      a.status = randomStatus();
+      a.zone = STATUS_ZONES[a.status] ?? 'workspace';
+      // Update the pixel character's zone if we can find it
+      if (a.pixelCharId !== undefined) {
+        const os = officeStateRef.current;
+        if (os) {
+          const ch = os.characters.get(a.pixelCharId);
+          if (ch) {
+            (ch as { agentZone?: string }).agentZone = a.zone;
+            // Always clear path so agent re-routes to new zone immediately
+            ch.path = [];
+            ch.wanderTimer = 0;  // trigger immediate wander decision
+            ch.isActive = false; // stand up from desk, start wandering to zone
+          }
+        }
+      }
+    }
+  });
+  hiredAgentsListeners.forEach(l => l());
+}, 10000);
+
+function useHiredAgents() {
+  const [list, setList] = useState<HiredAgent[]>([...hiredAgentsStore]);
+  useEffect(() => {
+    const update = () => setList([...hiredAgentsStore]);
+    hiredAgentsListeners.push(update);
+    return () => { hiredAgentsListeners = hiredAgentsListeners.filter(l => l !== update); };
+  }, []);
+  return list;
+}
+
+// ── Role Colors ──────────────────────────────────────────────────────────────
+const ROLE_COLORS: Record<string, string> = {
+  CEO: '#ffd700', CTO: '#00cfff', Manager: '#cc88ff',
+  Developer: '#00ff88', Designer: '#ff88cc', QA: '#aaff00',
+};
+
+// ── Agent List Panel ─────────────────────────────────────────────────────────
+function AgentListPanel({ agents, onSelect, selectedId }: {
+  agents: HiredAgent[];
+  onSelect: (id: string) => void;
+  selectedId: string | null;
+}) {
+  const [hovered, setHovered] = useState<string | null>(null);
+  if (agents.length === 0) return null;
+  return (
+    <div style={{
+      position: 'absolute', top: 10, right: 10, zIndex: 50,
+      background: 'var(--pixel-bg)', border: '2px solid var(--pixel-border)',
+      boxShadow: 'var(--pixel-shadow)', minWidth: 200, maxWidth: 240,
+      maxHeight: '70vh', display: 'flex', flexDirection: 'column',
+    }}>
+      <div style={{
+        background: 'var(--pixel-active-bg)', borderBottom: '2px solid var(--pixel-border)',
+        padding: '6px 10px', fontSize: '20px', color: 'var(--pixel-text)',
+      }}>
+        👥 Team ({agents.length})
+      </div>
+      <div style={{ overflowY: 'auto', flex: 1 }}>
+        {agents.map(a => (
+          <div
+            key={a.id}
+            onClick={() => onSelect(a.id)}
+            onMouseEnter={() => setHovered(a.id)}
+            onMouseLeave={() => setHovered(null)}
+            style={{
+              padding: '7px 10px', cursor: 'pointer',
+              borderBottom: '1px solid var(--pixel-border)',
+              background: selectedId === a.id
+                ? 'var(--pixel-active-bg)'
+                : hovered === a.id ? 'rgba(255,255,255,0.06)' : 'transparent',
+              display: 'flex', flexDirection: 'column', gap: 2,
+            }}
+          >
+            <span style={{ fontSize: '21px', color: 'var(--pixel-text)' }}>{a.name}</span>
+            <span style={{ fontSize: '18px', color: ROLE_COLORS[a.role] || '#aaaaff' }}>
+              {a.role} · {a.dept}
+            </span>
+            <span style={{ fontSize: '16px', color: a.status === 'Working' ? '#00ff88' : a.status === 'In Meeting' ? '#ffd700' : a.status === 'On Break' ? '#ff9966' : '#aaaaaa' }}>
+              ● {a.status}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Agent Detail Panel ───────────────────────────────────────────────────────
+function AgentDetailPanel({ agent, onClose, onFire }: {
+  agent: HiredAgent;
+  onClose: () => void;
+  onFire: (id: string) => void;
+}) {
+  const [confirmFire, setConfirmFire] = useState(false);
+  return (
+    <div style={{
+      position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)',
+      zIndex: 60, background: 'var(--pixel-bg)',
+      border: '2px solid var(--pixel-agent-border)',
+      boxShadow: 'var(--pixel-shadow)', minWidth: 260,
+    }}>
+      <div style={{
+        background: 'var(--pixel-agent-bg)', borderBottom: '2px solid var(--pixel-agent-border)',
+        padding: '6px 10px', fontSize: '20px', color: 'var(--pixel-agent-text)',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      }}>
+        <span>👤 {agent.name}</span>
+        <button onClick={onClose} style={{
+          background: 'transparent', border: 'none', color: 'var(--pixel-text)',
+          fontSize: '20px', cursor: 'pointer', padding: '0 4px',
+        }}>✕</button>
+      </div>
+      <div style={{ padding: '12px 14px', fontSize: '20px', lineHeight: 2 }}>
+        <div>
+          <span style={{ color: 'var(--pixel-text-dim)' }}>Role: </span>
+          <span style={{ color: ROLE_COLORS[agent.role] || '#aaaaff' }}>{agent.role}</span>
+        </div>
+        <div>
+          <span style={{ color: 'var(--pixel-text-dim)' }}>Dept: </span>
+          <span style={{ color: 'var(--pixel-text)' }}>{agent.dept}</span>
+        </div>
+        <div>
+          <span style={{ color: 'var(--pixel-text-dim)' }}>Status: </span>
+          <span style={{ color: agent.status === 'Working' ? '#00ff88' : agent.status === 'In Meeting' ? '#ffd700' : agent.status === 'On Break' ? '#ff9966' : '#aaaaaa' }}>
+            {agent.status}
+          </span>
+        </div>
+        <div>
+          <span style={{ color: 'var(--pixel-text-dim)' }}>Hired: </span>
+          <span style={{ color: 'var(--pixel-text)' }}>{agent.hireDate}</span>
+        </div>
+        <div style={{ marginTop: 10 }}>
+          {!confirmFire ? (
+            <button onClick={() => setConfirmFire(true)} style={{
+              width: '100%', padding: '5px', fontSize: '20px',
+              background: 'var(--pixel-danger-bg)', color: '#fff',
+              border: '2px solid #ff4444', borderRadius: 0, cursor: 'pointer',
+            }}>🔥 Fire Agent</button>
+          ) : (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={() => onFire(agent.id)} style={{
+                flex: 1, padding: '5px', fontSize: '20px',
+                background: 'var(--pixel-danger-bg)', color: '#fff',
+                border: '2px solid #ff4444', borderRadius: 0, cursor: 'pointer',
+              }}>Yes, Fire</button>
+              <button onClick={() => setConfirmFire(false)} style={{
+                flex: 1, padding: '5px', fontSize: '20px',
+                background: 'var(--pixel-btn-bg)', color: 'var(--pixel-text)',
+                border: '2px solid var(--pixel-border)', borderRadius: 0, cursor: 'pointer',
+              }}>Cancel</button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Global hire event listener ────────────────────────────────────────────────
+if (typeof window !== 'undefined') {
+  window.addEventListener('pixeloffice:hire', (e: Event) => {
+    const { name, role, dept } = (e as CustomEvent).detail;
+    addHiredAgent({
+      id: `hire_${Date.now()}_${Math.random().toString(36).slice(2,5)}`,
+      name, role, dept,
+      status: 'Working',
+      hireDate: new Date().toLocaleDateString(),
+    });
+  });
 }
 
 const actionBarBtnStyle: React.CSSProperties = {
@@ -150,6 +366,129 @@ function App() {
     externalAssetDirectories,
   } = useExtensionMessages(getOfficeState, editor.setLastSavedLayout, isEditDirty);
 
+  // ── Paperclip State ────────────────────────────────────────────────────────
+  const hiredAgents = useHiredAgents();
+  const [selectedHiredId, setSelectedHiredId] = useState<string | null>(null);
+
+  // ── Floor state ───────────────────────────────────────────────
+  const [currentFloor, setCurrentFloor] = useState(0);
+
+  // ── Washroom occupancy ────────────────────────────────────────
+  const [washroomOccupied, setWashroomOccupied] = useState(false);
+  const [_washroomOccupant, setWashroomOccupant] = useState<string | null>(null);
+
+  // When an agent's status changes to 'On Break', simulate washroom visit
+  // Washroom is on all floors, bottom-right area
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const onBreak = hiredAgents.filter(a => a.status === 'On Break');
+      if (onBreak.length > 0 && !washroomOccupied && Math.random() < 0.3) {
+        const agent = onBreak[Math.floor(Math.random() * onBreak.length)];
+        setWashroomOccupied(true);
+        setWashroomOccupant(agent.name);
+        // Auto-clear after 15-30 seconds
+        setTimeout(() => {
+          setWashroomOccupied(false);
+          setWashroomOccupant(null);
+        }, 15000 + Math.random() * 15000);
+      }
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [hiredAgents, washroomOccupied]);
+
+  // Area labels — update based on floor + washroom status
+  const areaLabels = useMemo((): AreaLabel[] => {
+    const baseLabels = currentFloor === 0
+      ? [...DEFAULT_AREA_LABELS]
+      : currentFloor === 1
+        ? [...FLOOR2_AREA_LABELS]
+        : [...FLOOR3_AREA_LABELS];
+
+    // Update washroom label based on occupancy
+    return baseLabels.map(l =>
+      l.label === 'WASHROOM'
+        ? {
+            ...l,
+            label: washroomOccupied
+              ? `WASHROOM [OCCUPIED]`
+              : 'WASHROOM [FREE]',
+            color: washroomOccupied ? '#ff6666' : '#aaffdd',
+          }
+        : l
+    );
+  }, [currentFloor, washroomOccupied]);
+  const FLOOR_FILES = ['floor-0.json', 'floor-1.json', 'floor-2.json'];
+
+  const loadFloorFile = useCallback(async (floor: number) => {
+    try {
+      const base = window.location.href.replace(/\/[^/]*$/, '/');
+      const resp = await fetch(`${base}assets/${FLOOR_FILES[floor]}?t=${Date.now()}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const layout = await resp.json() as { version: number };
+      if (layout.version === 1) {
+        window.dispatchEvent(new MessageEvent('message', {
+          data: { type: 'layoutLoaded', layout }
+        }));
+      }
+    } catch (e) {
+      console.warn('[FloorSwitch] Failed to load floor', floor, e);
+    }
+  }, []);
+
+  // Always reload floor-0 after assets are ready (fixes washroom not showing on refresh)
+  useEffect(() => {
+    if (!layoutReady) return;
+    // Small delay to ensure browserMock layout has settled
+    const t = setTimeout(() => { void loadFloorFile(0); }, 500);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layoutReady]);
+
+  const handleFloorChange = useCallback(async (floor: number) => {
+    if (floor === currentFloor) return;
+    setCurrentFloor(floor);
+    await loadFloorFile(floor);
+  }, [currentFloor, loadFloorFile]);
+  const selectedHiredAgent = hiredAgents.find(a => a.id === selectedHiredId) ?? null;
+
+  const handleHireAgent = useCallback((name: string, role: string, dept: string) => {
+    // Dispatch to Pixel Agents engine — use a numeric-friendly id
+    const numericId = Date.now();
+    const agentId = `hired_${numericId}`;
+    window.dispatchEvent(new MessageEvent('message', {
+      data: {
+        type: 'agentCreated',
+        id: numericId,
+        folderName: `${name} (${role})`,
+        palette: Math.floor(Math.random() * 6),
+        hueShift: Math.floor(Math.random() * 360),
+      }
+    }));
+    // Add to our list, recording the pixel char id
+    addHiredAgent({
+      id: agentId,
+      name, role, dept,
+      status: 'Working',
+      zone: 'workspace',
+      hireDate: new Date().toLocaleDateString(),
+      pixelCharId: numericId,
+    });
+  }, []);
+
+  const handleFireAgent = useCallback((id: string) => {
+    // Find pixelCharId BEFORE removing from store
+    const agent = hiredAgentsStore.find(a => a.id === id);
+    const pixelId = agent?.pixelCharId;
+    removeHiredAgent(id);
+    setSelectedHiredId(null);
+    // Dispatch agentClosed with NUMERIC id so engine removes the character
+    if (pixelId !== undefined) {
+      window.dispatchEvent(new MessageEvent('message', {
+        data: { type: 'agentClosed', id: pixelId }
+      }));
+    }
+  }, []);
+
   // Show migration notice once layout reset is detected
   const [migrationNoticeDismissed, setMigrationNoticeDismissed] = useState(false);
   const showMigrationNotice = layoutWasReset && !migrationNoticeDismissed;
@@ -187,7 +526,6 @@ function App() {
   }, []);
 
   const handleClick = useCallback((agentId: number) => {
-    // If clicked agent is a sub-agent, focus the parent's terminal instead
     const os = getOfficeState();
     const meta = os.subagentMeta.get(agentId);
     const focusId = meta ? meta.parentAgentId : agentId;
@@ -196,10 +534,8 @@ function App() {
 
   const officeState = getOfficeState();
 
-  // Force dependency on editorTickForKeyboard to propagate keyboard-triggered re-renders
   void editorTickForKeyboard;
 
-  // Show "Press R to rotate" hint when a rotatable item is selected or being placed
   const showRotateHint =
     editor.isEditMode &&
     (() => {
@@ -253,6 +589,7 @@ function App() {
         officeState={officeState}
         onClick={handleClick}
         isEditMode={editor.isEditMode}
+        areaLabels={areaLabels}
         editorState={editorState}
         onEditorTileAction={editor.handleEditorTileAction}
         onEditorEraseAction={editor.handleEditorEraseAction}
@@ -279,6 +616,22 @@ function App() {
         }}
       />
 
+      {/* Paperclip: Agent List Panel */}
+      <AgentListPanel
+        agents={hiredAgents}
+        onSelect={(id) => setSelectedHiredId(prev => prev === id ? null : id)}
+        selectedId={selectedHiredId}
+      />
+
+      {/* Paperclip: Agent Detail Panel */}
+      {selectedHiredAgent && (
+        <AgentDetailPanel
+          agent={selectedHiredAgent}
+          onClose={() => setSelectedHiredId(null)}
+          onFire={handleFireAgent}
+        />
+      )}
+
       <BottomToolbar
         isEditMode={editor.isEditMode}
         onOpenClaude={editor.handleOpenClaude}
@@ -289,6 +642,9 @@ function App() {
         onToggleAlwaysShowOverlay={handleToggleAlwaysShowOverlay}
         workspaceFolders={workspaceFolders}
         externalAssetDirectories={externalAssetDirectories}
+        onHireAgent={handleHireAgent}
+        currentFloor={currentFloor}
+        onFloorChange={handleFloorChange}
       />
 
       {editor.isEditMode && editor.isDirty && (
@@ -320,7 +676,6 @@ function App() {
 
       {editor.isEditMode &&
         (() => {
-          // Compute selected furniture color from current layout
           const selUid = editorState.selectedFurnitureUid;
           const selColor = selUid
             ? (officeState.getLayout().furniture.find((f) => f.uid === selUid)?.color ?? null)

@@ -21,6 +21,7 @@ import type {
   SelectionRenderState,
 } from '../engine/renderer.js';
 import { renderFrame } from '../engine/renderer.js';
+import type { AreaLabel } from '../engine/renderer.js';
 import { getCatalogEntry, isRotatable } from '../layout/furnitureCatalog.js';
 import { EditTool, TILE_SIZE } from '../types.js';
 
@@ -39,6 +40,7 @@ interface OfficeCanvasProps {
   zoom: number;
   onZoomChange: (zoom: number) => void;
   panRef: React.MutableRefObject<{ x: number; y: number }>;
+  areaLabels?: AreaLabel[];
 }
 
 export function OfficeCanvas({
@@ -56,6 +58,7 @@ export function OfficeCanvas({
   zoom,
   onZoomChange,
   panRef,
+  areaLabels,
 }: OfficeCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -267,6 +270,7 @@ export function OfficeCanvas({
           officeState.getLayout().tileColors,
           officeState.getLayout().cols,
           officeState.getLayout().rows,
+          areaLabels,
         );
         offsetRef.current = { x: offsetX, y: offsetY };
 
@@ -280,7 +284,7 @@ export function OfficeCanvas({
       stop();
       observer.disconnect();
     };
-  }, [officeState, resizeCanvas, isEditMode, editorState, _editorTick, zoom, panRef]);
+  }, [officeState, resizeCanvas, isEditMode, editorState, _editorTick, zoom, panRef, areaLabels]);
 
   // Convert CSS mouse coords to world (sprite pixel) coords
   const screenToWorld = useCallback(
@@ -766,9 +770,9 @@ export function OfficeCanvas({
         // Accumulate scroll delta, step zoom when threshold crossed
         zoomAccumulatorRef.current += e.deltaY;
         if (Math.abs(zoomAccumulatorRef.current) >= ZOOM_SCROLL_THRESHOLD) {
-          const delta = zoomAccumulatorRef.current < 0 ? 1 : -1;
+          const delta = zoomAccumulatorRef.current < 0 ? 0.5 : -0.5;
           zoomAccumulatorRef.current = 0;
-          const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom + delta));
+          const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round((zoom + delta) * 2) / 2));
           if (newZoom !== zoom) {
             onZoomChange(newZoom);
           }

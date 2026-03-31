@@ -239,36 +239,121 @@ export function getSeatTiles(seats: Map<string, Seat>): Set<string> {
   return tiles;
 }
 
-/** Default floor colors for the two rooms */
-const DEFAULT_LEFT_ROOM_COLOR: FloorColor = { h: 35, s: 30, b: 15, c: 0 }; // warm beige
-const DEFAULT_RIGHT_ROOM_COLOR: FloorColor = { h: 25, s: 45, b: 5, c: 10 }; // warm brown
+/** Floor colors per zone */
+const COLOR_WORKSPACE:   FloorColor = { h: 210, s: 15, b: -20, c: 0 };  // blue-grey
+const COLOR_CONFERENCE:  FloorColor = { h: 120, s: 20, b: -25, c: 0 };  // green
+const COLOR_CAFETERIA:   FloorColor = { h: 35,  s: 25, b: -20, c: 0 };  // warm
+const COLOR_WASHROOM:    FloorColor = { h: 200, s: 30, b: -30, c: 0 };  // cool blue
 
-/** Create a minimal fallback layout (used only when no default-layout.json exists) */
+/** Create a multi-room office layout:
+ *  - Main workspace (rows 1-12, cols 1-25)
+ *  - Conference room (rows 1-9, cols 28-34) with doorway at col 27 rows 5-6
+ *  - Cafeteria (rows 15-20, cols 1-19) with doorway at row 14 cols 10-11
+ *  - Washroom (rows 15-20, cols 23-34) with doorway at row 14 cols 28-29
+ */
 export function createDefaultLayout(): OfficeLayout {
+  const COLS = DEFAULT_COLS; // 36
+  const ROWS = DEFAULT_ROWS; // 22
   const W = TileType.WALL;
-  const F1 = TileType.FLOOR_1;
-  const F2 = TileType.FLOOR_2;
+  const V = TileType.VOID;
 
+  // Build a 2D grid first, then flatten
+  const grid: TileTypeVal[][] = [];
+  const colors: Array<FloorColor | null>[] = [];
+
+  for (let r = 0; r < ROWS; r++) {
+    grid.push(new Array(COLS).fill(V) as TileTypeVal[]);
+    colors.push(new Array(COLS).fill(null) as Array<FloorColor | null>);
+  }
+
+  function setCell(r: number, c: number, t: TileTypeVal, color?: FloorColor | null) {
+    if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return;
+    grid[r][c] = t;
+    colors[r][c] = color ?? null;
+  }
+
+  function fillRect(r1: number, c1: number, r2: number, c2: number, t: TileTypeVal, color?: FloorColor | null) {
+    for (let r = r1; r <= r2; r++)
+      for (let c = c1; c <= c2; c++)
+        setCell(r, c, t, color);
+  }
+
+  function hLine(r: number, c1: number, c2: number, t: TileTypeVal) {
+    for (let c = c1; c <= c2; c++) setCell(r, c, t, null);
+  }
+
+  function vLine(c: number, r1: number, r2: number, t: TileTypeVal) {
+    for (let r = r1; r <= r2; r++) setCell(r, c, t, null);
+  }
+
+  // ── Outer border ───────────────────────────────────────────────
+  hLine(0, 0, COLS - 1, W);
+  hLine(ROWS - 1, 0, COLS - 1, W);
+  vLine(0, 0, ROWS - 1, W);
+  vLine(COLS - 1, 0, ROWS - 1, W);
+
+  // ── Main workspace (rows 1-12, cols 1-25) ─────────────────────
+  fillRect(1, 1, 12, 25, TileType.FLOOR_1, COLOR_WORKSPACE);
+
+  // ── Vertical wall separating main from conference (col 27) ────
+  vLine(27, 0, 10, W);
+  // Doorway at rows 5-6 (2 tiles wide)
+  setCell(5, 27, TileType.FLOOR_1, COLOR_WORKSPACE);
+  setCell(6, 27, TileType.FLOOR_1, COLOR_WORKSPACE);
+
+  // ── Conference room (rows 1-9, cols 28-34) ───────────────────
+  fillRect(1, 28, 9, 34, TileType.FLOOR_2, COLOR_CONFERENCE);
+  // Bottom wall of conference room
+  hLine(10, 27, COLS - 1, W);
+
+  // ── Horizontal divider wall (row 14) ─────────────────────────
+  hLine(14, 0, COLS - 1, W);
+  // Col 26 is wall connecting to outer border (fill gaps)
+  vLine(26, 0, 14, W);
+
+  // ── Cafeteria doorway (row 14, cols 10-11) ───────────────────
+  setCell(14, 10, TileType.FLOOR_3, COLOR_CAFETERIA);
+  setCell(14, 11, TileType.FLOOR_3, COLOR_CAFETERIA);
+
+  // ── Cafeteria (rows 15-20, cols 1-19) ───────────────────────
+  fillRect(15, 1, 20, 19, TileType.FLOOR_3, COLOR_CAFETERIA);
+
+  // ── Vertical wall between cafeteria and washroom (col 21) ────
+  vLine(21, 14, ROWS - 1, W);
+
+  // ── Washroom doorway (row 14, cols 28-29) ───────────────────
+  setCell(14, 28, TileType.FLOOR_4, COLOR_WASHROOM);
+  setCell(14, 29, TileType.FLOOR_4, COLOR_WASHROOM);
+
+  // ── Washroom (rows 15-20, cols 23-34) ───────────────────────
+  fillRect(15, 23, 20, 34, TileType.FLOOR_4, COLOR_WASHROOM);
+
+  // ── Vertical wall between col 21-22 (washroom left wall) ─────
+  vLine(22, 14, ROWS - 1, W);
+
+  // ── Fill void areas with wall ────────────────────────────────
+  // Area between main workspace and conference: row 11-12, cols 27-34
+  fillRect(11, 27, 12, COLS - 1, W);
+  // Area between conference and right border bottom: row 10+
+  // already set to wall
+  // Cols 26 rows 1-12 (gap column between workspace and conference)
+  fillRect(1, 26, 12, 26, W);
+  // Area bottom-left corner (row 14+, cols 20-22 gaps)
+  fillRect(15, 20, 20, 20, W);
+  // Corridor bottom area cols 22-22
+  // already set
+
+  // Flatten 2D → 1D
   const tiles: TileTypeVal[] = [];
   const tileColors: Array<FloorColor | null> = [];
-
-  for (let r = 0; r < DEFAULT_ROWS; r++) {
-    for (let c = 0; c < DEFAULT_COLS; c++) {
-      if (r === 0 || r === DEFAULT_ROWS - 1 || c === 0 || c === DEFAULT_COLS - 1) {
-        tiles.push(W);
-        tileColors.push(null);
-      } else if (c < 10) {
-        tiles.push(F1);
-        tileColors.push(DEFAULT_LEFT_ROOM_COLOR);
-      } else {
-        tiles.push(F2);
-        tileColors.push(DEFAULT_RIGHT_ROOM_COLOR);
-      }
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      tiles.push(grid[r][c]);
+      tileColors.push(colors[r][c]);
     }
   }
 
-  // Minimal fallback with no furniture — the default-layout.json provides the real default
-  return { version: 1, cols: DEFAULT_COLS, rows: DEFAULT_ROWS, tiles, tileColors, furniture: [] };
+  return { version: 1, cols: COLS, rows: ROWS, tiles, tileColors, furniture: [] };
 }
 
 /** Serialize layout to JSON string */
@@ -358,10 +443,10 @@ function migrateLayout(layout: OfficeLayout): OfficeLayout {
         tileColors.push(null);
         break;
       case 1: // was TILE_FLOOR → FLOOR_1 beige
-        tileColors.push(DEFAULT_LEFT_ROOM_COLOR);
+        tileColors.push({ h: 35, s: 30, b: 15, c: 0 });
         break;
       case 2: // was WOOD_FLOOR → FLOOR_2 brown
-        tileColors.push(DEFAULT_RIGHT_ROOM_COLOR);
+        tileColors.push({ h: 25, s: 45, b: 5, c: 10 });
         break;
       case 3: // was CARPET → FLOOR_3 purple
         tileColors.push({ h: 280, s: 40, b: -5, c: 0 });

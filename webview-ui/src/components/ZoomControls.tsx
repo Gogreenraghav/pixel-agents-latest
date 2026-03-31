@@ -92,7 +92,7 @@ export function ZoomControls({ zoom, onZoomChange }: ZoomControlsProps) {
             pointerEvents: 'none',
           }}
         >
-          {zoom}x
+          {(zoom % 1 === 0 ? zoom : zoom.toFixed(1))}x
         </div>
       )}
 
@@ -109,7 +109,7 @@ export function ZoomControls({ zoom, onZoomChange }: ZoomControlsProps) {
         }}
       >
         <button
-          onClick={() => onZoomChange(zoom + 1)}
+          onClick={() => onZoomChange(Math.round((zoom + 0.5) * 2) / 2)}
           disabled={maxDisabled}
           onMouseEnter={() => setHovered('plus')}
           onMouseLeave={() => setHovered(null)}
@@ -144,7 +144,7 @@ export function ZoomControls({ zoom, onZoomChange }: ZoomControlsProps) {
           </svg>
         </button>
         <button
-          onClick={() => onZoomChange(zoom - 1)}
+          onClick={() => onZoomChange(Math.round((zoom - 0.5) * 2) / 2)}
           disabled={minDisabled}
           onMouseEnter={() => setHovered('minus')}
           onMouseLeave={() => setHovered(null)}

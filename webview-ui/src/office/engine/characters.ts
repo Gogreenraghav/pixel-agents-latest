@@ -10,6 +10,8 @@ import {
   WANDER_PAUSE_MIN_SEC,
 } from '../../constants.js';
 import { findPath } from '../layout/tileMap.js';
+import { randomTileInZone } from './officeState.js';
+import type { ZoneName } from './officeState.js';
 import type { CharacterSprites } from '../sprites/spriteData.js';
 import type { Character, Seat, SpriteData, TileType as TileTypeVal } from '../types.js';
 import { CharacterState, Direction, TILE_SIZE } from '../types.js';
@@ -80,6 +82,7 @@ export function createCharacter(
     seatTimer: 0,
     isSubagent: false,
     parentAgentId: null,
+    agentZone: undefined,
     matrixEffect: null,
     matrixEffectTimer: 0,
     matrixEffectSeeds: [],
@@ -184,7 +187,10 @@ export function updateCharacter(
           }
         }
         if (walkableTiles.length > 0) {
-          const target = walkableTiles[Math.floor(Math.random() * walkableTiles.length)];
+          const zoneTarget = ch.agentZone
+            ? randomTileInZone(ch.agentZone as ZoneName, walkableTiles)
+            : null;
+          const target = zoneTarget ?? walkableTiles[Math.floor(Math.random() * walkableTiles.length)];
           const path = findPath(
             ch.tileCol,
             ch.tileRow,

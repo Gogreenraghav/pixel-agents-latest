@@ -34,6 +34,27 @@ import { CharacterState, Direction, MATRIX_EFFECT_DURATION, TILE_SIZE } from '..
 import { createCharacter, updateCharacter } from './characters.js';
 import { matrixEffectSeeds } from './matrixEffect.js';
 
+export const ZONES = {
+  workspace:  { cols: [1, 9]   as [number, number],  rows: [11, 18] as [number, number] },
+  conference: { cols: [1, 9]   as [number, number],  rows: [11, 18] as [number, number] },
+  cafeteria:  { cols: [11, 18] as [number, number],  rows: [11, 18] as [number, number] },
+  washroom:   { cols: [11, 18] as [number, number],  rows: [19, 20] as [number, number] },
+} as const;
+
+export type ZoneName = keyof typeof ZONES;
+
+export function randomTileInZone(
+  zone: ZoneName,
+  walkableTiles: Array<{ col: number; row: number }>,
+): { col: number; row: number } | null {
+  const z = ZONES[zone];
+  const candidates = walkableTiles.filter(
+    t => t.col >= z.cols[0] && t.col <= z.cols[1] && t.row >= z.rows[0] && t.row <= z.rows[1],
+  );
+  if (candidates.length === 0) return null;
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}
+
 export class OfficeState {
   layout: OfficeLayout;
   tileMap: TileTypeVal[][];

@@ -21,8 +21,12 @@ export function extractToolName(status: string): string | null {
 
 import { ZOOM_DEFAULT_DPR_FACTOR, ZOOM_MIN } from '../constants.js';
 
-/** Compute a default integer zoom level (device pixels per sprite pixel) */
+/** Compute a default zoom level that fits the large office map */
 export function defaultZoom(): number {
   const dpr = window.devicePixelRatio || 1;
-  return Math.max(ZOOM_MIN, Math.round(ZOOM_DEFAULT_DPR_FACTOR * dpr));
+  // Use a smaller factor for the large 36x22 map so whole office is visible
+  const raw = ZOOM_DEFAULT_DPR_FACTOR * dpr;
+  // Allow half-steps: 0.5, 1, 1.5, 2 ...
+  const snapped = Math.round(raw * 2) / 2;
+  return Math.max(ZOOM_MIN, snapped);
 }

@@ -552,6 +552,90 @@ export interface EditorRenderState {
   ghostBorderHoverRow: number;
 }
 
+
+// ── Area Labels ──────────────────────────────────────────────────────────────
+export interface AreaLabel {
+  label: string;
+  col: number;
+  row: number;
+  color?: string;
+}
+
+/** Default area labels for the office floors
+ *
+ * Ground floor map reference (21 cols × 22 rows):
+ *   Left room  (working area) : cols 1-9,   rows 11-20
+ *   Right room (lounge)       : cols 11-18, rows 11-18
+ *   Bottom-right (washroom)   : cols 11-19, rows 19-20
+ *
+ * Labels placed in empty spaces, centered in each zone.
+ */
+export const DEFAULT_AREA_LABELS: AreaLabel[] = [
+  // Left room — 1 row up (row12→11) and 1 col left (col2→1)
+  { label: 'WORKING AREA', col: 4,  row: 11, color: '#aaccff' },
+  { label: 'LOUNGE',       col: 14, row: 12, color: '#ffddaa' },
+  // Washroom gate unchanged
+  { label: 'WASHROOM',     col: 12, row: 18, color: '#aaffdd' },
+];
+
+export const FLOOR2_AREA_LABELS: AreaLabel[] = [
+  { label: 'CONF ROOM',    col: 5,  row: 20, color: '#aaffcc' },
+  { label: 'LOUNGE',       col: 14, row: 12, color: '#ffddaa' },
+  { label: 'WASHROOM',     col: 12, row: 18, color: '#aaffdd' },
+];
+
+export const FLOOR3_AREA_LABELS: AreaLabel[] = [
+  { label: 'WORKING AREA', col: 4,  row: 11, color: '#aaccff' },
+  { label: 'BREAK ROOM',   col: 14, row: 12, color: '#ffccaa' },
+  { label: 'WASHROOM',     col: 12, row: 18, color: '#aaffdd' },
+];
+
+export function renderAreaLabels(
+  ctx: CanvasRenderingContext2D,
+  labels: AreaLabel[],
+  offsetX: number,
+  offsetY: number,
+  zoom: number,
+): void {
+  const s = TILE_SIZE * zoom;
+  const fontSize = Math.max(9, Math.round(zoom * 7));
+  const pad = Math.max(3, Math.round(zoom * 2));
+
+  ctx.save();
+  ctx.font = `bold ${fontSize}px "Press Start 2P", monospace`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+
+  for (const label of labels) {
+    const px = offsetX + label.col * s + 4;
+    const py = offsetY + label.row * s + 4;
+
+    // Measure text for background box
+    const metrics = ctx.measureText(label.label);
+    const tw = metrics.width;
+    const th = fontSize;
+
+    // Dark semi-transparent background box (pixel-style: no rounding)
+    ctx.fillStyle = 'rgba(10, 10, 30, 0.72)';
+    ctx.fillRect(px - pad, py - pad, tw + pad * 2, th + pad * 2);
+
+    // 1px pixel border
+    ctx.strokeStyle = label.color ?? '#ffffff';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px - pad, py - pad, tw + pad * 2, th + pad * 2);
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.9)';
+    ctx.fillText(label.label, px + 1, py + 1);
+
+    // Label text
+    ctx.fillStyle = label.color ?? '#ffffff';
+    ctx.fillText(label.label, px, py);
+  }
+
+  ctx.restore();
+}
+
 export interface SelectionRenderState {
   selectedAgentId: number | null;
   hoveredAgentId: number | null;
@@ -575,6 +659,7 @@ export function renderFrame(
   tileColors?: Array<FloorColor | null>,
   layoutCols?: number,
   layoutRows?: number,
+  areaLabels?: AreaLabel[],
 ): { offsetX: number; offsetY: number } {
   // Clear
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
@@ -617,6 +702,11 @@ export function renderFrame(
 
   // Speech bubbles (always on top of characters)
   renderBubbles(ctx, characters, offsetX, offsetY, zoom);
+
+  // Area labels (on top of everything, below editor)
+  if (areaLabels && areaLabels.length > 0) {
+    renderAreaLabels(ctx, areaLabels, offsetX, offsetY, zoom);
+  }
 
   // Editor overlays
   if (editor) {

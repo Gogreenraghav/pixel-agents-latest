@@ -190,4 +190,6 @@ export interface Character {
   matrixEffectSeeds: number[];
   /** Workspace folder name (only set for multi-root workspaces) */
   folderName?: string;
+  /** Zone this agent should wander to */
+  agentZone?: 'workspace' | 'conference' | 'cafeteria' | 'washroom';
 }

@@ -781,3 +781,8 @@ export function renderFrame(
 
   return { offsetX, offsetY };
 }
+
+export const FLOOR4_AREA_LABELS: AreaLabel[] = [
+  { label: 'WORKING AREA', col: 4,  row: 11, color: '#aaccff' },
+  { label: 'WORKING AREA', col: 14, row: 11, color: '#aaccff' },
+];

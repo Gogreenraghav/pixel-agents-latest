@@ -516,7 +516,7 @@ export function BottomToolbar({
             }}
             title="Switch floor"
           >
-            🏢 Floor {currentFloor + 1}
+            {currentFloor === 0 ? '🏢 Ground' : `🏢 Floor ${currentFloor}`}
           </button>
           {isFloorOpen && (
             <div style={{
@@ -532,9 +532,10 @@ export function BottomToolbar({
               zIndex: 'var(--pixel-controls-z)',
             }}>
               {[
-                { label: '🏢 Ground Floor', desc: 'Main workspace' },
-                { label: '🏢 Floor 2',      desc: 'Warm tones' },
-                { label: '🏢 Floor 3',      desc: 'Cool tones' },
+                { label: '🏢 Ground Floor', desc: 'Working Area + Lounge' },
+                { label: '🏢 Floor 1',      desc: 'Conference Room' },
+                { label: '🏢 Floor 2',      desc: 'Break Room' },
+                { label: '🏢 Floor 3',      desc: 'Double Working Area' },
               ].map((f, i) => (
                 <button
                   key={i}

@@ -8,7 +8,7 @@ import { useEditorActions } from './hooks/useEditorActions.js';
 import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
 import { useExtensionMessages } from './hooks/useExtensionMessages.js';
 import { OfficeCanvas } from './office/components/OfficeCanvas.js';
-import { DEFAULT_AREA_LABELS, FLOOR2_AREA_LABELS, FLOOR3_AREA_LABELS } from './office/engine/renderer.js';
+import { DEFAULT_AREA_LABELS, FLOOR2_AREA_LABELS, FLOOR3_AREA_LABELS, FLOOR4_AREA_LABELS } from './office/engine/renderer.js';
 import type { AreaLabel } from './office/engine/renderer.js';
 import { ToolOverlay } from './office/components/ToolOverlay.js';
 import { EditorState } from './office/editor/editorState.js';
@@ -402,7 +402,9 @@ function App() {
       ? [...DEFAULT_AREA_LABELS]
       : currentFloor === 1
         ? [...FLOOR2_AREA_LABELS]
-        : [...FLOOR3_AREA_LABELS];
+        : currentFloor === 2
+          ? [...FLOOR3_AREA_LABELS]
+          : [...FLOOR4_AREA_LABELS];
 
     // Update washroom label based on occupancy
     return baseLabels.map(l =>
@@ -417,7 +419,7 @@ function App() {
         : l
     );
   }, [currentFloor, washroomOccupied]);
-  const FLOOR_FILES = ['floor-0.json', 'floor-1.json', 'floor-2.json'];
+  const FLOOR_FILES = ['floor-0.json', 'floor-1.json', 'floor-2.json', 'floor-3.json'];
 
   const loadFloorFile = useCallback(async (floor: number) => {
     try {

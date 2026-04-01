@@ -268,3 +268,101 @@ export function dispatchMockMessages(): void {
 
   console.log('[BrowserMock] Messages dispatched');
 }
+
+// ─── Browser handlers for vscode.postMessage actions ───────────────────────
+// Intercepts messages dispatched via vscodeApi.ts → window 'vscode-post' event
+
+function downloadJson(data: unknown, filename: string): void {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function handleVscodePost(msg: unknown): void {
+  if (!msg || typeof msg !== 'object') return;
+  const m = msg as Record<string, unknown>;
+
+  switch (m.type) {
+    case 'exportLayout': {
+      // Export current layout (stored in window.__officeLayout or fetch floor-0)
+      const layout = (window as unknown as Record<string, unknown>).__officeLayout;
+      if (layout) {
+        downloadJson(layout, 'office-layout-export.json');
+      } else {
+        const base = window.location.href.replace(/\/[^/]*$/, '/');
+        fetch(`${base}assets/floor-0.json`)
+          .then(r => r.json())
+          .then(d => downloadJson(d, 'office-layout-export.json'))
+          .catch(() => alert('Export failed'));
+      }
+      break;
+    }
+    case 'importLayout': {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.json';
+      input.onchange = () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const layout = JSON.parse(e.target?.result as string);
+            window.dispatchEvent(new MessageEvent('message', { data: { type: 'layoutLoaded', layout } }));
+            console.log('[BrowserMock] Layout imported successfully');
+          } catch {
+            alert('Invalid layout JSON file');
+          }
+        };
+        reader.readAsText(file);
+      };
+      input.click();
+      break;
+    }
+    case 'saveLayout': {
+      const layout = (window as unknown as Record<string, unknown>).__officeLayout;
+      if (layout) downloadJson(layout, 'office-layout-saved.json');
+      break;
+    }
+    case 'openSessionsFolder':
+      alert('Sessions folder: not available in browser mode');
+      break;
+    case 'addExternalAssetDirectory':
+      alert('Custom asset directories: not available in browser mode');
+      break;
+    case 'removeExternalAssetDirectory':
+      console.log('[BrowserMock] removeExternalAssetDirectory (no-op in browser)');
+      break;
+    case 'setSoundEnabled':
+      localStorage.setItem('pixelOfficeSoundEnabled', String(m.enabled));
+      console.log('[BrowserMock] Sound', m.enabled ? 'enabled' : 'disabled');
+      break;
+    default:
+      break;
+  }
+}
+
+// Register handler once
+if (typeof window !== 'undefined') {
+  window.addEventListener('vscode-post', (e) => {
+    handleVscodePost((e as MessageEvent).data);
+  });
+
+  // Track current layout for export
+  window.addEventListener('message', (e) => {
+    if (e.data?.type === 'layoutLoaded' && e.data?.layout) {
+      (window as unknown as Record<string, unknown>).__officeLayout = e.data.layout;
+    }
+  });
+
+  // Load sound preference from localStorage
+  const savedSound = localStorage.getItem('pixelOfficeSoundEnabled');
+  if (savedSound !== null) {
+    // Will be picked up by notificationSound.ts on next check
+    (window as unknown as Record<string, unknown>).__savedSoundEnabled = savedSound === 'true';
+  }
+}

@@ -43,6 +43,8 @@ interface HiredAgent {
   hireDate: string;
   zone?: string;
   salary?: number;
+  currency?: string;
+  country?: string;
   performance?: number;
   level?: number;
 }
@@ -55,7 +57,10 @@ interface Props {
   onFire: (id: string) => void;
   activeEvent?: OfficeEvent | null;
   eventLog?: OfficeEvent[];
-  onTriggerEvent?: () => void;
+  onTriggerEvent?: (type?: string) => void;
+  eventTemplates?: Array<{ type: string; title: string; icon: string; color: string; desc: string; duration: number }>;
+  autoEvents?: boolean;
+  onAutoEventsChange?: (v: boolean) => void;
 }
 
 const FLOOR_CAPACITY = 10;
@@ -92,8 +97,24 @@ function PixelProgressBar({ value, max, color }: { value: number; max: number; c
   );
 }
 
-export function StatsDashboard({ agents, currentFloor, onClose, onPromote, onFire, activeEvent, eventLog = [], onTriggerEvent }: Props) {
+export function StatsDashboard({ agents, currentFloor, onClose, onPromote, onFire, activeEvent, eventLog = [], onTriggerEvent, eventTemplates = [], autoEvents = true, onAutoEventsChange }: Props) {
   const [activeTab, setActiveTab] = useState<'overview' | 'payroll' | 'rankings' | 'events'>('overview');
+  const [selectedEventType, setSelectedEventType] = useState<string>('random');
+  const DEFAULT_FX_RATES: Record<string, number> = { USD: 1, INR: 84, GBP: 0.78, EUR: 0.92, JPY: 150, RUB: 90 };
+  const [fxRates, setFxRatesRaw] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem('pixeloffice_fx_rates');
+      if (saved) return { ...DEFAULT_FX_RATES, ...JSON.parse(saved) };
+    } catch { /* ignore */ }
+    return DEFAULT_FX_RATES;
+  });
+  const setFxRates = (updater: Record<string, number> | ((prev: Record<string, number>) => Record<string, number>)) => {
+    setFxRatesRaw(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      try { localStorage.setItem('pixeloffice_fx_rates', JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  };
   const [, setTick] = useState(0);
 
   // Live update every 5s
@@ -104,7 +125,7 @@ export function StatsDashboard({ agents, currentFloor, onClose, onPromote, onFir
 
   // ─── CALCULATIONS ────────────────────────────────────────────────────────
   const totalAgents = agents.length;
-  const monthlyCost = agents.reduce((sum, a) => sum + (a.salary ?? ROLE_SALARY[a.role] ?? 4000), 0);
+  const monthlyCost = agents.reduce((sum, a) => { const sal = a.salary ?? ROLE_SALARY[a.role] ?? 4000; const rate = fxRates[a.currency ?? 'USD'] ?? 1; return sum + sal / rate; }, 0);
   const avgSalary = totalAgents > 0 ? Math.round(monthlyCost / totalAgents) : 0;
 
   const productivity = totalAgents === 0 ? 0 : Math.round(
@@ -127,7 +148,7 @@ export function StatsDashboard({ agents, currentFloor, onClose, onPromote, onFir
   for (const a of agents) {
     if (!deptMap[a.dept]) deptMap[a.dept] = { count: 0, cost: 0 };
     deptMap[a.dept].count += 1;
-    deptMap[a.dept].cost += (a.salary ?? ROLE_SALARY[a.role] ?? 4000);
+    deptMap[a.dept].cost += (a.salary ?? ROLE_SALARY[a.role] ?? 4000) / (fxRates[a.currency ?? 'USD'] ?? 1);
   }
   const depts = Object.entries(deptMap).sort((x, y) => y[1].count - x[1].count);
   const deptsByCost = Object.entries(deptMap).sort((x, y) => y[1].cost - x[1].cost);
@@ -232,6 +253,7 @@ export function StatsDashboard({ agents, currentFloor, onClose, onPromote, onFir
         <button onClick={() => setActiveTab('payroll')} style={tabBtnStyle(activeTab === 'payroll')}>PAYROLL</button>
         <button onClick={() => setActiveTab('rankings')} style={tabBtnStyle(activeTab === 'rankings')}>RANKINGS</button>
         <button onClick={() => setActiveTab('events')} style={tabBtnStyle(activeTab === 'events')}>EVENTS</button>
+        <button onClick={() => setActiveTab('fx' as 'overview')} style={tabBtnStyle(activeTab === ('fx' as 'overview'))}>💱 FX</button>
       </div>
 
       {/* Content Area */}
@@ -386,10 +408,54 @@ export function StatsDashboard({ agents, currentFloor, onClose, onPromote, onFir
               {activeEvent ? `⚡ ${activeEvent.title} IN PROGRESS` : '📅 OFFICE EVENTS'}
             </div>
 
-            {/* Manual trigger button */}
-            <div style={{ padding: '10px 12px', borderBottom: '1px solid #333344' }}>
+            {/* Auto-events toggle */}
+            <div style={{ padding: '8px 12px', borderBottom: '1px solid #333344', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontFamily: 'monospace', fontSize: '17px', color: '#aaaaaa' }}>⚙ Auto Events</span>
               <button
-                onClick={onTriggerEvent}
+                onClick={() => onAutoEventsChange?.(!autoEvents)}
+                style={{
+                  padding: '4px 16px', fontFamily: 'monospace', fontSize: '16px', fontWeight: 'bold',
+                  background: autoEvents ? '#112211' : '#221111',
+                  color: autoEvents ? '#00ff88' : '#ff4444',
+                  border: `2px solid ${autoEvents ? '#00ff88' : '#ff4444'}`,
+                  cursor: 'pointer', letterSpacing: 1,
+                }}
+              >
+                {autoEvents ? 'ON' : 'OFF'}
+              </button>
+            </div>
+
+            {/* Manual trigger: type selector + button */}
+            <div style={{ padding: '10px 12px', borderBottom: '1px solid #333344', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {/* Event type picker */}
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => setSelectedEventType('random')}
+                  style={{
+                    padding: '4px 10px', fontFamily: 'monospace', fontSize: '16px',
+                    background: selectedEventType === 'random' ? '#223322' : '#111122',
+                    color: selectedEventType === 'random' ? '#aaffcc' : '#557755',
+                    border: `2px solid ${selectedEventType === 'random' ? '#00ff88' : '#333344'}`,
+                    cursor: 'pointer',
+                  }}
+                >🎲 Random</button>
+                {eventTemplates.map(tmpl => (
+                  <button
+                    key={tmpl.type}
+                    onClick={() => setSelectedEventType(tmpl.type)}
+                    style={{
+                      padding: '4px 10px', fontFamily: 'monospace', fontSize: '16px',
+                      background: selectedEventType === tmpl.type ? '#1a1122' : '#111122',
+                      color: selectedEventType === tmpl.type ? tmpl.color : '#666677',
+                      border: `2px solid ${selectedEventType === tmpl.type ? tmpl.color : '#333344'}`,
+                      cursor: 'pointer',
+                    }}
+                  >{tmpl.icon} {tmpl.title.split(' ')[0]}</button>
+                ))}
+              </div>
+              {/* Trigger button */}
+              <button
+                onClick={() => onTriggerEvent?.(selectedEventType === 'random' ? undefined : selectedEventType)}
                 disabled={!!activeEvent}
                 style={{
                   width: '100%', padding: '8px', fontFamily: 'monospace',
@@ -401,7 +467,7 @@ export function StatsDashboard({ agents, currentFloor, onClose, onPromote, onFir
                   letterSpacing: 1,
                 }}
               >
-                {activeEvent ? `⏳ EVENT RUNNING... (${activeEvent.icon})` : '▶ TRIGGER OFFICE EVENT'}
+                {activeEvent ? `⏳ EVENT RUNNING... (${activeEvent.icon})` : `▶ TRIGGER ${selectedEventType === 'random' ? 'RANDOM' : (eventTemplates.find(t => t.type === selectedEventType)?.title ?? 'EVENT')}`}
               </button>
             </div>
 
@@ -450,6 +516,58 @@ export function StatsDashboard({ agents, currentFloor, onClose, onPromote, onFir
                 </div>
               ))
             )}
+          </div>
+        )}
+
+        {/* ================== FX RATES TAB ================== */}
+        {activeTab === ('fx' as 'overview') && (
+          <div>
+            <div style={{ ...sectionHead, marginTop: 0, borderTop: 'none' }}>
+              💱 EXCHANGE RATES (to USD)
+            </div>
+            <div style={{ padding: '10px 12px' }}>
+              <div style={{ fontFamily: 'monospace', fontSize: '15px', color: '#666688', marginBottom: 10 }}>
+                Set today's rates manually. Stats Dashboard converts all salaries to USD using these values.
+              </div>
+              {Object.entries(fxRates).filter(([cur]) => cur !== 'USD').map(([cur, rate]) => (
+                <div key={cur} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                  <span style={{ fontFamily: 'monospace', fontSize: '18px', color: '#aaccff', width: 36 }}>{cur}</span>
+                  <span style={{ fontFamily: 'monospace', fontSize: '15px', color: '#555577', flex: 1 }}>
+                    {cur === 'INR' ? '₹' : cur === 'GBP' ? '£' : cur === 'EUR' ? '€' : cur === 'JPY' ? '¥' : cur === 'RUB' ? '₽' : cur}
+                    1 USD =
+                  </span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={rate}
+                    onChange={e => {
+                      const v = parseFloat(e.target.value);
+                      if (!isNaN(v) && v > 0) setFxRates(prev => ({ ...prev, [cur]: v }));
+                    }}
+                    style={{
+                      width: 100, padding: '5px 8px',
+                      background: '#0a0a14', color: '#ffdd44',
+                      border: '2px solid #333366', fontFamily: 'monospace',
+                      fontSize: '18px', textAlign: 'right',
+                    }}
+                  />
+                  <span style={{ fontFamily: 'monospace', fontSize: '16px', color: '#666688' }}>
+                    {cur === 'INR' ? '₹' : cur === 'GBP' ? '£' : cur === 'EUR' ? '€' : cur === 'JPY' ? '¥' : cur === 'RUB' ? '₽' : ''}
+                  </span>
+                </div>
+              ))}
+              <div style={{ marginTop: 12, padding: '8px 10px', background: '#0d0d1a', border: '1px solid #333344', fontFamily: 'monospace', fontSize: '15px', color: '#556688' }}>
+                💡 Example: 1 USD = {fxRates.INR ?? 84} INR &nbsp;|&nbsp; 1 USD = {fxRates.GBP ?? 0.78} GBP
+              </div>
+              <button
+                onClick={() => { localStorage.removeItem('pixeloffice_fx_rates'); setFxRates({ USD: 1, INR: 84, GBP: 0.78, EUR: 0.92, JPY: 150, RUB: 90 }); }}
+                style={{
+                  marginTop: 12, width: '100%', padding: '7px', fontFamily: 'monospace',
+                  fontSize: '16px', background: '#111122', color: '#888899',
+                  border: '2px solid #333344', cursor: 'pointer',
+                }}
+              >↺ Reset to Defaults</button>
+            </div>
           </div>
         )}
 

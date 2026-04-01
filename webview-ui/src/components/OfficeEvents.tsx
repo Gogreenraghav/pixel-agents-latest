@@ -25,6 +25,7 @@ interface Props {
   onEventStart: (event: OfficeEvent) => void;
   onEventEnd: (event: OfficeEvent) => void;
   onAgentStatusChange: (id: string, status: string, zone: string) => void;
+  autoEvents?: boolean;
 }
 
 // Event templates
@@ -98,15 +99,17 @@ function pickEvent(agents: HiredAgent[]) {
   return possible[0];
 }
 
-export function useOfficeEvents({ agents, onEventStart, onEventEnd, onAgentStatusChange }: Props) {
+export function useOfficeEvents({ agents, onEventStart, onEventEnd, onAgentStatusChange, autoEvents = true }: Props) {
   const [activeEvent, setActiveEvent] = useState<OfficeEvent | null>(null);
   const [lastEventTime, setLastEventTime] = useState(Date.now());
 
-  const triggerEvent = useCallback(() => {
+  const triggerEvent = useCallback((forceType?: string) => {
     if (activeEvent) return; // Already running
     if (agents.length === 0) return;
 
-    const tmpl = pickEvent(agents);
+    const tmpl = forceType
+      ? (EVENT_TEMPLATES.find(t => t.type === forceType) ?? pickEvent(agents))
+      : pickEvent(agents);
     if (!tmpl) return;
 
     const event: OfficeEvent = {
@@ -167,9 +170,9 @@ export function useOfficeEvents({ agents, onEventStart, onEventEnd, onAgentStatu
     }, CHECK_INTERVAL);
 
     return () => clearInterval(t);
-  }, [activeEvent, lastEventTime, triggerEvent]);
+  }, [activeEvent, lastEventTime, triggerEvent, autoEvents]);
 
-  return { activeEvent, triggerEvent };
+  return { activeEvent, triggerEvent, EVENT_TEMPLATES };
 }
 
 // ── Event Notification Banner ────────────────────────────────────────────────

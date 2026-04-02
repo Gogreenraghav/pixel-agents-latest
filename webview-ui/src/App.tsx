@@ -4,6 +4,7 @@ import { BottomToolbar } from './components/BottomToolbar.js';
 import { StatsDashboard, ROLE_SALARY } from './components/StatsDashboard.js';
 import { useOfficeEvents, EventBanner } from './components/OfficeEvents.js';
 import { AgentChatPanel } from './components/AgentChatPanel.js';
+import { CompanyDashboard } from './components/CompanyDashboard.js';
 import { SchedulePanel, getCurrentSlot, slotToAgentState } from './components/SchedulePanel.js';
 import type { DaySchedule } from './components/SchedulePanel.js';
 import type { OfficeEvent } from './components/OfficeEvents.js';
@@ -507,6 +508,7 @@ function App() {
   const [currentFloor, setCurrentFloor] = useState(isNaN(urlFloorParam) ? 0 : urlFloorParam);
   const [statsOpen, setStatsOpen] = useState(false);
   const [chatAgentId, setChatAgentId] = useState<string | null>(null);
+  const [dashboardOpen, setDashboardOpen] = useState(false);
   const [hireHistory, setHireHistory] = useState<HireHistoryEntry[]>(() => loadHistoryFromStorage());
   // ── Game Economy ─────────────────────────────────────────────────────────
   const LS_BALANCE_KEY = 'pixeloffice_balance';
@@ -952,6 +954,16 @@ function App() {
         }}
       />
 
+      {/* ── Company Dashboard ────────────────────────────────── */}
+      {dashboardOpen && (
+        <CompanyDashboard
+          agents={hiredAgents}
+          companyBalance={companyBalance}
+          companyRevenue={monthlyRevenue}
+          onClose={() => setDashboardOpen(false)}
+        />
+      )}
+
       {/* ── Agent Chat Panel ──────────────────────────────────── */}
       {chatAgentId && (() => {
         const chatAgent = hiredAgents.find(a => a.id === chatAgentId);
@@ -1051,6 +1063,7 @@ function App() {
         statsOpen={statsOpen}
         onScheduleClick={() => setScheduleOpen(v => !v)}
         scheduleOpen={scheduleOpen}
+        onDashboardClick={() => setDashboardOpen(v => !v)}
       /> }
 
       {editor.isEditMode && editor.isDirty && (

@@ -3,6 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BottomToolbar } from './components/BottomToolbar.js';
 import { StatsDashboard, ROLE_SALARY } from './components/StatsDashboard.js';
 import { useOfficeEvents, EventBanner } from './components/OfficeEvents.js';
+import { AgentChatPanel } from './components/AgentChatPanel.js';
+import { SchedulePanel, getCurrentSlot, slotToAgentState } from './components/SchedulePanel.js';
+import type { DaySchedule } from './components/SchedulePanel.js';
 import type { OfficeEvent } from './components/OfficeEvents.js';
 import { DebugView } from './components/DebugView.js';
 import { ZoomControls } from './components/ZoomControls.js';
@@ -34,6 +37,15 @@ function getOfficeState(): OfficeState {
 }
 
 // ── Hired Agents Store (Paperclip) ──────────────────────────────────────────
+interface AIConfig {
+  provider: string;      // 'litellm' | 'ollama' | 'openai' | 'groq' | 'anthropic' | 'custom'
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  connected: boolean;    // last test result
+  lastTested?: string;
+}
+
 interface HiredAgent {
   id: string;
   name: string;
@@ -49,25 +61,63 @@ interface HiredAgent {
   performance: number;  // 0-100
   level: number;        // 1=Junior, 2=Mid, 3=Senior, 4=Lead
   tasksCompleted: number;
+  aiConfig?: AIConfig;  // optional AI provider config
 }
 
-const hiredAgentsStore: HiredAgent[] = [];
+interface HireHistoryEntry {
+  id: string;
+  agentName: string;
+  role: string;
+  dept: string;
+  salary: number;
+  currency: string;
+  country: string;
+  action: 'hired' | 'fired';
+  date: string;
+  aiProvider?: string;
+}
+
+function loadHistoryFromStorage(): HireHistoryEntry[] {
+  try { const r = localStorage.getItem(LS_HISTORY_KEY); return r ? JSON.parse(r) : []; } catch { return []; }
+}
+function saveHistoryToStorage(h: HireHistoryEntry[]) {
+  try { localStorage.setItem(LS_HISTORY_KEY, JSON.stringify(h.slice(0, 50))); } catch {}
+}
+
+const LS_AGENTS_KEY = 'pixeloffice_agents';
+const LS_HISTORY_KEY = 'pixeloffice_hire_history';
+
+function loadAgentsFromStorage(): HiredAgent[] {
+  try {
+    const raw = localStorage.getItem(LS_AGENTS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveAgentsToStorage(agents: HiredAgent[]) {
+  try { localStorage.setItem(LS_AGENTS_KEY, JSON.stringify(agents)); } catch { /* ignore */ }
+}
+
+const hiredAgentsStore: HiredAgent[] = loadAgentsFromStorage();
 let hiredAgentsListeners: (() => void)[] = [];
 
 function addHiredAgent(agent: HiredAgent) {
   hiredAgentsStore.push(agent);
+  saveAgentsToStorage(hiredAgentsStore);
   hiredAgentsListeners.forEach(l => l());
 }
 
 function removeHiredAgent(id: string) {
   const idx = hiredAgentsStore.findIndex(a => a.id === id);
   if (idx >= 0) hiredAgentsStore.splice(idx, 1);
+  saveAgentsToStorage(hiredAgentsStore);
   hiredAgentsListeners.forEach(l => l());
 }
 
 function updateHiredAgent(id: string, patch: Partial<HiredAgent>) {
   const agent = hiredAgentsStore.find(a => a.id === id);
   if (agent) Object.assign(agent, patch);
+  saveAgentsToStorage(hiredAgentsStore);
   hiredAgentsListeners.forEach(l => l());
 }
 
@@ -185,12 +235,13 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
 
 const LEVEL_NAMES = ['Junior', 'Mid', 'Senior', 'Lead', 'Principal'];
 
-function AgentDetailPanel({ agent, onClose, onFire, onPromote, onDemote }: {
+function AgentDetailPanel({ agent, onClose, onFire, onPromote, onDemote, onChat }: {
   agent: HiredAgent;
   onClose: () => void;
   onFire: (id: string) => void;
   onPromote: (id: string) => void;
   onDemote: (id: string) => void;
+  onChat?: (id: string) => void;
 }) {
   const [confirmFire, setConfirmFire] = useState(false);
   const levelName = LEVEL_NAMES[(agent.level ?? 1) - 1] ?? 'Junior';
@@ -228,6 +279,13 @@ function AgentDetailPanel({ agent, onClose, onFire, onPromote, onDemote }: {
           <span>{FLAGS[agent.country ?? 'Global'] ?? '🌍'} {agent.country ?? 'Global'}</span></div>
         <div><span style={{ color: 'var(--pixel-text-dim)' }}>Dept: </span>
           <span>{agent.dept}</span></div>
+        {agent.aiConfig && (
+          <div><span style={{ color: 'var(--pixel-text-dim)' }}>AI Brain: </span>
+            <span style={{ color: agent.aiConfig.connected ? '#00ff88' : '#ff4444' }}>
+              {agent.aiConfig.connected ? '🤖 ' : '⚠ '}{agent.aiConfig.provider}
+            </span>
+          </div>
+        )}
         <div><span style={{ color: 'var(--pixel-text-dim)' }}>Status: </span>
           <span style={{ color: agent.status === 'Working' ? '#00ff88' : agent.status === 'In Meeting' ? '#ffd700' : agent.status === 'On Break' ? '#ff9966' : '#aaaaaa' }}>
             {agent.status}</span></div>
@@ -251,6 +309,11 @@ function AgentDetailPanel({ agent, onClose, onFire, onPromote, onDemote }: {
         </div>
 
         {/* Promote / Demote */}
+        {agent.aiConfig && onChat && (
+          <button onClick={() => onChat(agent.id)} style={{
+            ...btnStyle, width: '100%', marginTop: 10, marginBottom: -4, background: '#0a0a14', color: '#aaccff', borderColor: '#334466'
+          }}>💬 Chat with Agent</button>
+        )}
         <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
           <button
             onClick={() => onPromote(agent.id)}
@@ -443,6 +506,61 @@ function App() {
   const isEmbedMode = new URLSearchParams(window.location.search).get('embed') === '1';
   const [currentFloor, setCurrentFloor] = useState(isNaN(urlFloorParam) ? 0 : urlFloorParam);
   const [statsOpen, setStatsOpen] = useState(false);
+  const [chatAgentId, setChatAgentId] = useState<string | null>(null);
+  const [hireHistory, setHireHistory] = useState<HireHistoryEntry[]>(() => loadHistoryFromStorage());
+  // ── Game Economy ─────────────────────────────────────────────────────────
+  const LS_BALANCE_KEY = 'pixeloffice_balance';
+  const LS_BUDGET_KEY  = 'pixeloffice_dept_budgets';
+  const STARTING_BALANCE = 50000;
+
+  const [companyBalance, setCompanyBalance] = useState<number>(() => {
+    try { const s = localStorage.getItem(LS_BALANCE_KEY); return s ? parseFloat(s) : STARTING_BALANCE; } catch { return STARTING_BALANCE; }
+  });
+  const [deptBudgets, setDeptBudgets] = useState<Record<string, number>>(() => {
+    try { const s = localStorage.getItem(LS_BUDGET_KEY); return s ? JSON.parse(s) : {}; } catch { return {}; }
+  });
+
+  // ── Schedule System ─────────────────────────────────────────────────────
+  const LS_SCHED_KEY = 'pixeloffice_schedule';
+  const DEFAULT_SCHED: DaySchedule = [
+    { startHour: 9,  endHour: 13,  type: 'work' },
+    { startHour: 13, endHour: 14,  type: 'lunch' },
+    { startHour: 14, endHour: 16,  type: 'work' },
+    { startHour: 16, endHour: 16.5, type: 'break' },
+    { startHour: 16.5, endHour: 18, type: 'work' },
+  ];
+  const [schedule, setSchedule] = useState<DaySchedule>(() => {
+    try { const s = localStorage.getItem(LS_SCHED_KEY); return s ? JSON.parse(s) : DEFAULT_SCHED; } catch { return DEFAULT_SCHED; }
+  });
+  const [officeHour, setOfficeHour] = useState<number>(() => {
+    const now = new Date();
+    return now.getHours() + now.getMinutes() / 60;
+  });
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [clockAuto, setClockAuto] = useState(true);        // auto-advance clock
+  const [clockSpeed, setClockSpeed] = useState(1);          // 1=real, 2=2x, 5=5x, 10=10x
+  // Per-agent schedules: agentId -> DaySchedule (overrides global if set)
+  const LS_AGENT_SCHED_KEY = 'pixeloffice_agent_schedules';
+  const [agentSchedules, setAgentSchedules] = useState<Record<string, DaySchedule>>(() => {
+    try { const s = localStorage.getItem(LS_AGENT_SCHED_KEY); return s ? JSON.parse(s) : {}; } catch { return {}; }
+  });
+
+  // Auto-advance office clock: 1 real second = clockSpeed office minutes
+  useEffect(() => {
+    if (!clockAuto) return;
+    const t = setInterval(() => {
+      setOfficeHour(prev => {
+        const next = prev + clockSpeed / 60;
+        return next >= 24 ? 0 : next;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, [clockAuto, clockSpeed]);
+
+  // Revenue: each working agent generates $200-$400/day (~$6k-$12k/mo)
+  // Deduct payroll each "tick" (every 60s = simulated day)
+  const FX_RATES_DEFAULT: Record<string, number> = { USD: 1, INR: 84, GBP: 0.78, EUR: 0.92, JPY: 150, RUB: 90 };
+
   const [autoEvents, setAutoEvents] = useState(true);
   const [eventLog, setEventLog] = useState<OfficeEvent[]>([]);
   const [dismissedEvent, setDismissedEvent] = useState(false);
@@ -512,10 +630,26 @@ function App() {
   }, []);
 
   // Always reload floor-0 after assets are ready (fixes washroom not showing on refresh)
+  // Also re-spawn all persisted hired agents into the pixel engine
   useEffect(() => {
     if (!layoutReady) return;
-    // Small delay to ensure browserMock layout has settled
-    const t = setTimeout(() => { void loadFloorFile(urlFloorParam || 0); }, 500);
+    const t = setTimeout(() => {
+      void loadFloorFile(urlFloorParam || 0);
+      // Re-create pixel characters for all agents loaded from localStorage
+      hiredAgentsStore.forEach(agent => {
+        if (agent.pixelCharId !== undefined) {
+          window.dispatchEvent(new MessageEvent('message', {
+            data: {
+              type: 'agentCreated',
+              id: agent.pixelCharId,
+              folderName: `${agent.name} (${agent.role})`,
+              palette: Math.floor(Math.random() * 6),
+              hueShift: Math.floor(Math.random() * 360),
+            }
+          }));
+        }
+      });
+    }, 600);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layoutReady]);
@@ -523,11 +657,12 @@ function App() {
   const handleFloorChange = useCallback(async (floor: number) => {
     if (floor === currentFloor) return;
     setCurrentFloor(floor);
+    try { localStorage.setItem('pixeloffice_floor', String(floor)); } catch { /* ignore */ }
     await loadFloorFile(floor);
   }, [currentFloor, loadFloorFile]);
   const selectedHiredAgent = hiredAgents.find(a => a.id === selectedHiredId) ?? null;
 
-  const handleHireAgent = useCallback((name: string, role: string, dept: string, salary: number, currency: string, country: string) => {
+  const handleHireAgent = useCallback((name: string, role: string, dept: string, salary: number, currency: string, country: string, aiConfig?: AIConfig) => {
     // Dispatch to Pixel Agents engine — use a numeric-friendly id
     const numericId = Date.now();
     const agentId = `hired_${numericId}`;
@@ -554,6 +689,7 @@ function App() {
       performance: 60 + Math.floor(Math.random() * 25),
       level: 1,
       tasksCompleted: 0,
+      aiConfig,
     });
   }, []);
 
@@ -589,6 +725,61 @@ function App() {
     onAgentStatusChange: handleAgentStatusChange,
   });
 
+  // ── Game Loop: Revenue + Payroll tick every 60s ─────────────────────────
+  useEffect(() => {
+    const TICK_MS = 60000; // 60s = 1 simulated work-day
+    const t = setInterval(() => {
+      setCompanyBalance(prev => {
+        const agents = hiredAgentsStore;
+        // Revenue: working agents generate value
+        const revenue = agents.reduce((sum, a) => {
+          if (a.status === 'Working') return sum + 250 + (a.performance ?? 60) * 2;
+          if (a.status === 'In Meeting') return sum + 150;
+          return sum + 50;
+        }, 0);
+        // Payroll cost per tick (monthly / 30 days)
+        const payroll = agents.reduce((sum, a) => {
+          const salUSD = (a.salary ?? 4000) / (FX_RATES_DEFAULT[a.currency ?? 'USD'] ?? 1);
+          return sum + salUSD / 30;
+        }, 0);
+        const newBalance = prev + revenue - payroll;
+        try { localStorage.setItem(LS_BALANCE_KEY, String(newBalance)); } catch {}
+        return newBalance;
+      });
+    }, TICK_MS);
+    return () => clearInterval(t);
+  }, []);
+
+  // ── Dept budget handler ───────────────────────────────────────────────────
+  const handleDeptBudgetChange = useCallback((dept: string, budget: number) => {
+    setDeptBudgets(prev => {
+      const next = { ...prev, [dept]: budget };
+      try { localStorage.setItem(LS_BUDGET_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  // Compute monthly revenue for display (based on current agent status)
+  const monthlyRevenue = hiredAgents.reduce((sum, a) => {
+    if (a.status === 'Working') return sum + (250 + (a.performance ?? 60) * 2) * 30;
+    if (a.status === 'In Meeting') return sum + 150 * 30;
+    return sum + 50 * 30;
+  }, 0);
+
+  // Enforce schedule: per-agent or global, every 30 office-minutes
+  useEffect(() => {
+    if (activeEvent) return; // Office event overrides schedule
+    hiredAgentsStore.forEach(a => {
+      const agentSched = agentSchedules[a.id];
+      const activeSched = agentSched && agentSched.length > 0 ? agentSched : schedule;
+      const slot = getCurrentSlot(activeSched, officeHour);
+      const { status, zone } = slotToAgentState(slot);
+      if (a.status !== status || a.zone !== zone) {
+        handleAgentStatusChange(a.id, status, zone);
+      }
+    });
+  }, [Math.floor(officeHour * 2), schedule, agentSchedules, activeEvent]);
+
   // Performance drift + tasks completed every 30s
   useEffect(() => {
     const t = setInterval(() => {
@@ -608,9 +799,21 @@ function App() {
     return () => clearInterval(t);
   }, []);
 
+  const handleUpdateAgentAI = useCallback((agentId: string, aiConfig: any) => {
+    updateHiredAgent(agentId, { aiConfig });
+  }, []);
+
   const handleFireAgent = useCallback((id: string) => {
     // Find pixelCharId BEFORE removing from store
     const agent = hiredAgentsStore.find(a => a.id === id);
+    if (agent) {
+      setHireHistory(prev => {
+        const entry: HireHistoryEntry = { id, agentName: agent.name, role: agent.role, dept: agent.dept, salary: agent.salary, currency: agent.currency, country: agent.country, action: 'fired', date: new Date().toLocaleString() };
+        const updated = [entry, ...prev];
+        saveHistoryToStorage(updated);
+        return updated;
+      });
+    }
     const pixelId = agent?.pixelCharId;
     removeHiredAgent(id);
     setSelectedHiredId(null);
@@ -749,6 +952,40 @@ function App() {
         }}
       />
 
+      {/* ── Agent Chat Panel ──────────────────────────────────── */}
+      {chatAgentId && (() => {
+        const chatAgent = hiredAgents.find(a => a.id === chatAgentId);
+        if (!chatAgent || !chatAgent.aiConfig) return null;
+        return (
+          <AgentChatPanel
+            agentId={chatAgent.id}
+            agentName={chatAgent.name}
+            agentRole={chatAgent.role}
+            aiConfig={chatAgent.aiConfig}
+            onClose={() => setChatAgentId(null)}
+            onConfigUpdate={(cfg) => handleUpdateAgentAI(chatAgentId, cfg)}
+          />
+        );
+      })()}
+
+      {/* ── Company Balance HUD ─────────────────────────────── */}
+      {!isEmbedMode && (
+        <div style={{
+          position: 'absolute', top: 8, right: 8, zIndex: 45,
+          background: 'var(--pixel-agent-bg)', border: '2px solid var(--pixel-agent-border)',
+          padding: '4px 12px', fontFamily: 'monospace', fontSize: '18px',
+          display: 'flex', gap: 16, alignItems: 'center',
+          boxShadow: 'var(--pixel-shadow)', pointerEvents: 'none',
+        }}>
+          <span style={{ color: companyBalance >= 0 ? '#00ff88' : '#ff4444' }}>
+            💰 ${Math.round(companyBalance).toLocaleString()}
+          </span>
+          <span style={{ color: '#aaccff' }}>
+            📈 +${Math.round(monthlyRevenue / 30).toLocaleString()}/day
+          </span>
+        </div>
+      )}
+
       {/* Paperclip: Agent List Panel */}
       <AgentListPanel
         agents={hiredAgents}
@@ -764,18 +1001,42 @@ function App() {
           onDemote={handleDemoteAgent}
           onClose={() => setSelectedHiredId(null)}
           onFire={handleFireAgent}
+          onChat={(id) => { setSelectedHiredId(null); setChatAgentId(id); }}
         />
       )}
 
-      {!isEmbedMode && statsOpen && <StatsDashboard agents={hiredAgents} currentFloor={currentFloor} onClose={() => setStatsOpen(false)} onPromote={handlePromoteAgent} onFire={handleFireAgent} activeEvent={activeEvent} eventLog={eventLog} onTriggerEvent={triggerEvent} eventTemplates={EVENT_TEMPLATES} autoEvents={autoEvents} onAutoEventsChange={setAutoEvents} />}
+      {!isEmbedMode && statsOpen && <StatsDashboard agents={hiredAgents} currentFloor={currentFloor} onClose={() => setStatsOpen(false)} onPromote={handlePromoteAgent} onFire={handleFireAgent} activeEvent={activeEvent} eventLog={eventLog} onTriggerEvent={triggerEvent} eventTemplates={EVENT_TEMPLATES} autoEvents={autoEvents} companyBalance={companyBalance} companyRevenue={monthlyRevenue} deptBudgets={deptBudgets} onDeptBudgetChange={handleDeptBudgetChange} hireHistory={hireHistory} onAutoEventsChange={setAutoEvents} />}
 
       {/* Office Event Banner */}
       {!isEmbedMode && !dismissedEvent && (
         <EventBanner event={activeEvent} onDismiss={() => setDismissedEvent(true)} />
       )}
+      {!isEmbedMode && scheduleOpen && (
+        <div style={{ position: 'absolute', top: 8, left: 8, zIndex: 200, maxHeight: 'calc(100vh - 100px)', overflowY: 'auto' }}>
+          <SchedulePanel
+            onClose={() => setScheduleOpen(false)}
+            officeHour={officeHour}
+            onOfficeHourChange={h => setOfficeHour(h)}
+            clockAuto={clockAuto}
+            onClockAutoChange={setClockAuto}
+            clockSpeed={clockSpeed}
+            onClockSpeedChange={setClockSpeed}
+            schedule={schedule}
+            onScheduleChange={s => { setSchedule(s); try { localStorage.setItem('pixeloffice_schedule', JSON.stringify(s)); } catch {} }}
+            agents={hiredAgents}
+            agentSchedules={agentSchedules}
+            onAgentScheduleChange={(agentId, s) => {
+              setAgentSchedules(prev => {
+                const next = { ...prev, [agentId]: s };
+                try { localStorage.setItem(LS_AGENT_SCHED_KEY, JSON.stringify(next)); } catch {}
+                return next;
+              });
+            }}
+          />
+        </div>
+      )}
       {!isEmbedMode && <BottomToolbar
         isEditMode={editor.isEditMode}
-        onOpenClaude={editor.handleOpenClaude}
         onToggleEditMode={editor.handleToggleEditMode}
         isDebugMode={isDebugMode}
         onToggleDebugMode={handleToggleDebugMode}
@@ -788,6 +1049,8 @@ function App() {
         onFloorChange={handleFloorChange}
         onStatsClick={() => setStatsOpen(v => !v)}
         statsOpen={statsOpen}
+        onScheduleClick={() => setScheduleOpen(v => !v)}
+        scheduleOpen={scheduleOpen}
       /> }
 
       {editor.isEditMode && editor.isDirty && (

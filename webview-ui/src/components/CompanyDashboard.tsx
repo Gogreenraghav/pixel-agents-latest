@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { OrgChart } from './OrgChart.js';
+import { CEOInbox } from './CEOInbox.js';
 
 interface HiredAgent {
   id: string; name: string; role: string; dept: string; status: string;
@@ -15,6 +17,21 @@ interface Props {
 }
 
 const TASK_TYPES = ['Code', 'Research', 'Draft', 'Analysis', 'Sales Script', 'Design', 'Review'];
+const LS_TASKS = 'pixeloffice_tasks';
+const LS_OUTPUTS = 'pixeloffice_outputs';
+
+function loadTasks(): Task[] {
+  try { return JSON.parse(localStorage.getItem(LS_TASKS) ?? 'null') ?? MOCK_TASKS; } catch { return MOCK_TASKS; }
+}
+function saveTasks(t: Task[]) { try { localStorage.setItem(LS_TASKS, JSON.stringify(t)); } catch {} }
+function saveOutput(agentId: string, taskId: string, taskTitle: string, output: string) {
+  try {
+    const key = LS_OUTPUTS + '_' + agentId;
+    const existing = JSON.parse(localStorage.getItem(key) ?? '[]');
+    existing.unshift({ taskId, taskTitle, output, date: new Date().toLocaleString() });
+    localStorage.setItem(key, JSON.stringify(existing.slice(0, 50)));
+  } catch {}
+}
 const MOCK_TASKS: Task[] = [
   { id: 't1', agentId: '', agentName: 'Ravi (Developer)', type: 'Code', title: 'Build login API', status: 'done', createdAt: '2026-04-02 09:00', output: 'Login API completed with JWT auth.' },
   { id: 't2', agentId: '', agentName: 'Priya (Designer)', type: 'Design', title: 'Homepage mockup', status: 'running', createdAt: '2026-04-02 10:30' },
@@ -35,26 +52,157 @@ const inp: React.CSSProperties = {
 };
 
 function TaskBoard({ agents }: { agents: HiredAgent[] }) {
-  const [tasks, setTasks] = useState<Task[]>(MOCK_TASKS);
+  const [tasks, setTasks] = useState<Task[]>(loadTasks);
+  const [runningId, setRunningId] = useState<string | null>(null);
+  const [_errorId, setErrorId] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newType, setNewType] = useState('Code');
   const [newAgent, setNewAgent] = useState('');
+  const [autopilotEnabled, setAutopilotEnabled] = useState(false);
+  const [autopilotPaused, setAutopilotPaused] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const ceo = agents.find(a => a.role === 'CEO');
+
+  // Auto-run loop: every 30s, if enabled, check for todo tasks
+  useEffect(() => {
+    if (!autopilotEnabled || autopilotPaused) return;
+    const interval = setInterval(async () => {
+      const todoTasks = tasks.filter(t => t.status === 'todo');
+      for (const task of todoTasks) {
+        if (runningId || autopilotPaused) break;
+        await runTaskWithAI(task, true);
+      }
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [autopilotEnabled, autopilotPaused, tasks, runningId]);
+  const [showGoalModal, setShowGoalModal] = useState(false);
+  const [goalTitle, setGoalTitle] = useState('');
+  const [goalDesc, setGoalDesc] = useState('');
+  const [activeGoal, setActiveGoal] = useState<any>(JSON.parse(localStorage.getItem('pixeloffice_company_goal') || 'null'));
+
+  const setCompanyGoal = () => {
+    const goal = { title: goalTitle, desc: goalDesc, createdAt: new Date().toLocaleString() };
+    localStorage.setItem('pixeloffice_company_goal', JSON.stringify(goal));
+    setActiveGoal(goal);
+    setShowGoalModal(false);
+  };
+
+  const generateTasks = async () => {
+    if (!activeGoal || !ceo) return;
+    setRunningId('generating');
+    const prompt = `Goal: ${activeGoal.title}\nDescription: ${activeGoal.desc}\nAgents: ${agents.map(a => `${a.name} (${a.role})`).join(', ')}\n\nBreak this goal into 5 tasks. Output as a JSON list of objects: { title, type, targetAgentId, priority }. Use only valid agent IDs from list: ${agents.map(a => a.id).join(', ')}. JSON only.`;
+    
+    try {
+      const cfg = ceo.aiConfig as any;
+      const res = await fetch((cfg.baseUrl ?? '').replace(/\/$/, '') + '/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.apiKey ?? ''}` },
+        body: JSON.stringify({ model: cfg.model, messages: [{ role: 'user', content: prompt }], max_tokens: 500 }),
+      });
+      const data = await res.json();
+      const txt = data.choices?.[0]?.message?.content ?? '[]';
+      const parsed = JSON.parse(txt.replace(/```json|```/g, '').trim());
+      
+      const newTasks: Task[] = parsed.map((p: any) => ({
+        id: `t${Date.now()}_${Math.random()}`,
+        agentId: p.targetAgentId ?? '',
+        agentName: agents.find(a => a.id === p.targetAgentId)?.name ?? 'Unassigned',
+        type: p.type ?? 'Code',
+        title: p.title,
+        status: 'todo',
+        createdAt: new Date().toLocaleString()
+      }));
+      updateTasks(p => [...newTasks, ...p]);
+    } catch (e) {
+      console.error('Goal generation failed', e);
+    } finally { setRunningId(null); }
+  };
+
+  const updateTasks = (updater: (prev: Task[]) => Task[]) => {
+    setTasks(prev => { const next = updater(prev); saveTasks(next); return next; });
+  };
 
   const addTask = () => {
     if (!newTitle.trim()) return;
-    const agentName = agents.find(a => a.id === newAgent)?.name ?? 'Unassigned';
-    setTasks(p => [...p, { id: `t${Date.now()}`, agentId: newAgent, agentName, type: newType, title: newTitle, status: 'todo', createdAt: new Date().toLocaleString() }]);
+    const agent = agents.find(a => a.id === newAgent);
+    const agentName = agent?.name ?? 'Unassigned';
+    const newTask: Task = { id: `t${Date.now()}`, agentId: newAgent, agentName, type: newType, title: newTitle, status: 'todo', createdAt: new Date().toLocaleString() };
+    updateTasks(p => [newTask, ...p]);
     setNewTitle(''); setShowNew(false);
+  };
+
+  const runTaskWithAI = async (task: Task, auto = false) => {
+    const agent = agents.find(a => a.id === task.agentId);
+    if (!agent?.aiConfig) { if (!auto) setErrorId(task.id); return; }
+    setRunningId(task.id);
+    setErrorId(null);
+    updateTasks(p => p.map(t => t.id === task.id ? { ...t, status: 'running' } : t));
+
+    const prompt = `You are ${agent.name}, a ${agent.role} at a company. Complete this task professionally and thoroughly:\n\nTask Type: ${task.type}\nTask: ${task.title}\n\nProvide a complete, professional output for this task. Be specific and practical.`;
+
+    try {
+      const cfg = agent.aiConfig as any;
+      const res = await fetch((cfg.baseUrl ?? '').replace(/\/$/, '') + '/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.apiKey ?? ''}` },
+        body: JSON.stringify({ model: cfg.model, messages: [{ role: 'user', content: prompt }], max_tokens: 512 }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const output = data.choices?.[0]?.message?.content ?? '(no output)';
+      
+      updateTasks(p => p.map(t => t.id === task.id ? { ...t, status: 'done', output } : t));
+      saveOutput(task.agentId, task.id, task.title, output);
+
+      // Feedback to CEO
+      const inboxKey = 'pixeloffice_ceo_inbox';
+      const inbox = JSON.parse(localStorage.getItem(inboxKey) ?? '[]');
+      inbox.unshift({ id: `msg_${Date.now()}`, subject: `Task Auto-Completed: ${task.title}`, body: `Agent ${agent.name} completed task: ${task.title}\n\nOutput preview:\n${output.slice(0, 100)}...`, from: 'System', date: new Date().toLocaleString() });
+      localStorage.setItem(inboxKey, JSON.stringify(inbox.slice(0, 100)));
+      
+    } catch (e: any) {
+      updateTasks(p => p.map(t => t.id === task.id ? { ...t, status: 'failed', output: e.message } : t));
+      if (!auto) setErrorId(task.id);
+    } finally { setRunningId(null); }
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <span style={{ color: '#66ddff', fontSize: '20px', fontWeight: 'bold' }}>Total: {tasks.length} tasks</span>
-        <button onClick={() => setShowNew(v => !v)} style={{ padding: '8px 18px', fontFamily: 'monospace', fontSize: '18px', fontWeight: 'bold', background: '#0d1a2a', color: '#66aaff', border: '2px solid #334466', cursor: 'pointer' }}>+ New Task</button>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={() => setShowGoalModal(true)} style={{ padding: '8px 18px', fontFamily: 'monospace', fontSize: '18px', fontWeight: 'bold', background: '#1a1a33', color: '#ffee55', border: '2px solid #334466', cursor: 'pointer' }}>🎯 Set Goal</button>
+          <button onClick={generateTasks} style={{ padding: '8px 18px', fontFamily: 'monospace', fontSize: '18px', fontWeight: 'bold', background: '#220033', color: '#ff66ff', border: '2px solid #551155', cursor: 'pointer' }}>🤖 Autopilot Tasks</button>
+          <button onClick={() => setAutopilotEnabled(!autopilotEnabled)} style={{ padding: '8px 18px', fontFamily: 'monospace', fontSize: '18px', fontWeight: 'bold', background: autopilotEnabled ? '#061a0d' : '#1a0606', color: autopilotEnabled ? '#33ffaa' : '#ff6666', border: '2px solid', cursor: 'pointer' }}>{autopilotEnabled ? '🟢 ON' : '🔴 OFF'} Auto-Run</button>
+          {autopilotEnabled && (
+            <button onClick={() => setAutopilotPaused(!autopilotPaused)} style={{ padding: '8px 18px', fontFamily: 'monospace', fontSize: '18px', fontWeight: 'bold', background: autopilotPaused ? '#1a1a00' : '#0d1a2a', color: autopilotPaused ? '#ffee55' : '#66aaff', border: '2px solid', cursor: 'pointer' }}>{autopilotPaused ? '⏸️ PAUSED' : '▶️ RUNNING'}</button>
+          )}
+          <button onClick={() => setShowNew(v => !v)} style={{ padding: '8px 18px', fontFamily: 'monospace', fontSize: '18px', fontWeight: 'bold', background: '#0d1a2a', color: '#66aaff', border: '2px solid #334466', cursor: 'pointer' }}>+ New Task</button>
+        </div>
       </div>
+
+      {activeGoal && (
+        <div style={{ background: '#0d1a2a', border: '2px solid #44aaff', padding: '16px', marginBottom: 20 }}>
+          <div style={{ color: '#44aaff', fontSize: '16px', fontWeight: 'bold', marginBottom: 6 }}>🎯 CURRENT COMPANY GOAL</div>
+          <div style={{ color: '#aaddff', fontSize: '20px', fontWeight: 'bold' }}>{activeGoal.title}</div>
+          <div style={{ color: '#8899aa', fontSize: '16px', marginTop: 4 }}>{activeGoal.desc}</div>
+        </div>
+      )}
+
+      {showGoalModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 999, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+          <div style={{ background: '#0d0d1e', border: '2px solid #334466', padding: 24, width: 400 }}>
+            <div style={{ color: '#66ddff', fontSize: '22px', fontWeight: 'bold', marginBottom: 20 }}>🎯 Set Company Goal</div>
+            <input placeholder="Goal Title" value={goalTitle} onChange={e => setGoalTitle(e.target.value)} style={{ ...inp, marginBottom: 12 }} />
+            <textarea placeholder="Description" value={goalDesc} onChange={e => setGoalDesc(e.target.value)} style={{ ...inp, height: 100, marginBottom: 20 }} />
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button onClick={() => setShowGoalModal(false)} style={{ flex: 1, padding: 10, background: '#1a0606', color: '#ff6666', border: '2px solid #331111', cursor: 'pointer' }}>Cancel</button>
+              <button onClick={setCompanyGoal} style={{ flex: 1, padding: 10, background: '#061a0d', color: '#33ffaa', border: '2px solid #113322', cursor: 'pointer' }}>Set Goal</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showNew && (
         <div style={{ background: '#0d0d1a', border: '2px solid #334466', padding: '14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -85,8 +233,28 @@ function TaskBoard({ agents }: { agents: HiredAgent[] }) {
                   <div style={{ fontSize: '18px', color: '#ffcc00', fontWeight: 'bold', marginBottom: 6 }}>[{task.type}]</div>
                   <div style={{ fontSize: '20px', color: '#aaddff', fontWeight: 'bold', lineHeight: 1.4 }}>{task.title}</div>
                   <div style={{ fontSize: '18px', color: '#55ffbb', fontWeight: 'bold', marginTop: 8 }}>{task.agentName}</div>
+                  {/* Run / Delete buttons */}
+                  <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                    {task.status === 'todo' && agents.find(a => a.id === task.agentId)?.aiConfig && (
+                      <button onClick={e => { e.stopPropagation(); runTaskWithAI(task); }}
+                        disabled={runningId === task.id}
+                        style={{ flex: 1, padding: '6px', fontFamily: 'monospace', fontSize: '15px', fontWeight: 'bold', background: '#0a1a0a', color: '#00ff88', border: '2px solid #00ff88', cursor: 'pointer' }}>
+                        {runningId === task.id ? '⏳ Running...' : '▶ Run (AI)'}
+                      </button>
+                    )}
+                    {task.status === 'failed' && agents.find(a => a.id === task.agentId)?.aiConfig && (
+                      <button onClick={e => { e.stopPropagation(); updateTasks(p => p.map(t => t.id === task.id ? { ...t, status: 'todo', output: undefined } : t)); }}
+                        style={{ flex: 1, padding: '6px', fontFamily: 'monospace', fontSize: '15px', fontWeight: 'bold', background: '#1a0a0a', color: '#ffaa44', border: '2px solid #aa5500', cursor: 'pointer' }}>
+                        🔄 Retry
+                      </button>
+                    )}
+                    <button onClick={e => { e.stopPropagation(); updateTasks(p => p.filter(t => t.id !== task.id)); }}
+                      style={{ padding: '6px 10px', fontFamily: 'monospace', fontSize: '15px', background: '#1a0808', color: '#ff4444', border: '2px solid #aa2222', cursor: 'pointer' }}>
+                      🗑
+                    </button>
+                  </div>
                   {expandedId === task.id && task.output && (
-                    <div style={{ marginTop: 10, padding: '10px', background: '#0a1a0a', border: '2px solid #1a7a3a', fontSize: '16px', color: '#aaffaa', lineHeight: 1.6 }}>{task.output}</div>
+                    <div style={{ marginTop: 10, padding: '10px', background: '#0a1a0a', border: '2px solid #1a7a3a', fontSize: '16px', color: '#aaffaa', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{task.output}</div>
                   )}
                 </div>
               ))}
@@ -98,18 +266,25 @@ function TaskBoard({ agents }: { agents: HiredAgent[] }) {
   );
 }
 
+function loadAgentOutputs(agentId: string): Array<{name: string; size: string; date: string; content: string}> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LS_OUTPUTS + '_' + agentId) ?? '[]');
+    return raw.map((o: any) => ({
+      name: `${o.taskTitle?.replace(/[^a-z0-9]/gi,'_').toLowerCase() ?? 'output'}_${o.date?.replace(/[^0-9]/g,'').slice(0,12) ?? Date.now()}.txt`,
+      size: `${(o.output?.length / 1024).toFixed(1)} KB`,
+      date: o.date,
+      content: o.output,
+    }));
+  } catch { return []; }
+}
+
 function OutputFolders({ agents }: { agents: HiredAgent[] }) {
   const [sel, setSel] = useState<string | null>(agents[0]?.id ?? null);
   const [preview, setPreview] = useState<string | null>(null);
-
-  const mockFiles = (name: string) => [
-    { name: `code_output_2026-04-02_09-15.txt`, size: '2.4 KB', date: '2026-04-02 09:15', content: `// Generated by ${name}\nfunction loginUser(email, password) {\n  // JWT auth implementation\n}` },
-    { name: `research_2026-04-02_11-00.txt`, size: '5.1 KB', date: '2026-04-02 11:00', content: `Market Research Report\nQ2 2026 Analysis\n\nKey findings...` },
-    { name: `draft_email_2026-04-01.txt`, size: '1.2 KB', date: '2026-04-01 14:30', content: `Subject: Q2 Campaign Launch\n\nDear customer...` },
-  ];
+  const [refresh, setRefresh] = useState(0); void refresh;
 
   const agent = agents.find(a => a.id === sel);
-  const files = agent ? mockFiles(agent.name) : [];
+  const files = agent ? loadAgentOutputs(agent.id) : [];
 
   return (
     <div style={{ display: 'flex', height: '100%', gap: 0 }}>
@@ -131,8 +306,9 @@ function OutputFolders({ agents }: { agents: HiredAgent[] }) {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {agent ? (
           <>
-            <div style={{ padding: '12px 18px', borderBottom: '2px solid #223355', fontSize: '22px', color: '#66ddff', fontWeight: 'bold', background: '#0d0d1a' }}>
-              📁 {agent.name} / {agent.role} — {files.length} files
+            <div style={{ padding: '12px 18px', borderBottom: '2px solid #223355', fontSize: '22px', color: '#66ddff', fontWeight: 'bold', background: '#0d0d1a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>📁 {agent.name} / {agent.role} — {files.length} files</span>
+              <button onClick={() => setRefresh(r => r + 1)} style={{ padding: '4px 12px', fontFamily: 'monospace', fontSize: '15px', background: '#0d1a2a', color: '#66aaff', border: '2px solid #334466', cursor: 'pointer' }}>🔄</button>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
               {files.map((f, i) => (
@@ -162,39 +338,119 @@ function OutputFolders({ agents }: { agents: HiredAgent[] }) {
   );
 }
 
+const LS_SCRUM = 'pixeloffice_scrum_logs';
+interface ScrumRow { agentName: string; role: string; yesterday: string; today: string; blockers: string; }
+interface ScrumLog { date: string; rows: ScrumRow[]; summary?: string; }
+
+function loadScrumLogs(): ScrumLog[] {
+  try { return JSON.parse(localStorage.getItem(LS_SCRUM) ?? '[]'); } catch { return []; }
+}
+
 function ScrumBoard({ agents }: { agents: HiredAgent[] }) {
+  const [logs, setLogs] = useState<ScrumLog[]>(loadScrumLogs);
+  const [running, setRunning] = useState(false);
+  const [activeLog, setActiveLog] = useState<ScrumLog | null>(logs[0] ?? null);
   const today = new Date().toLocaleDateString();
-  const rows = agents.length > 0
-    ? agents.map(a => ({ agentName: a.name, role: a.role, yesterday: 'Completed assigned tasks', today: 'Working on new assignments', blockers: 'None' }))
-    : [
-        { agentName: 'Ravi', role: 'Developer', yesterday: 'Completed DB schema', today: 'Building login API', blockers: 'None' },
-        { agentName: 'Priya', role: 'Designer', yesterday: 'Wireframes done', today: 'Homepage mockup', blockers: 'Waiting for copy' },
-        { agentName: 'Amit', role: 'Analyst', yesterday: 'Competitor research', today: 'Market analysis', blockers: 'None' },
-      ];
+  const ceo = agents.find(a => a.role === 'CEO');
+
+  const runScrum = async () => {
+    if (running || agents.length === 0) return;
+    setRunning(true);
+    const rows: ScrumRow[] = [];
+
+    // Each agent generates their standup via AI (or placeholder if no AI)
+    for (const agent of agents) {
+      if (agent.aiConfig) {
+        try {
+          const cfg = agent.aiConfig as any;
+          const prompt = `You are ${agent.name}, a ${agent.role}. Give a brief daily standup in JSON format with keys: yesterday, today, blockers. Keep each under 10 words. JSON only, no markdown.`;
+          const res = await fetch((cfg.baseUrl ?? '').replace(/\/$/, '') + '/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.apiKey ?? ''}` },
+            body: JSON.stringify({ model: cfg.model, messages: [{ role: 'user', content: prompt }], max_tokens: 100 }),
+          });
+          const data = await res.json();
+          const txt = data.choices?.[0]?.message?.content ?? '{}';
+          const parsed = JSON.parse(txt.replace(/```json|```/g, '').trim());
+          rows.push({ agentName: agent.name, role: agent.role, yesterday: parsed.yesterday ?? 'Completed tasks', today: parsed.today ?? 'Continuing work', blockers: parsed.blockers ?? 'None' });
+        } catch {
+          rows.push({ agentName: agent.name, role: agent.role, yesterday: 'Completed tasks', today: 'Continuing work', blockers: 'None' });
+        }
+      } else {
+        rows.push({ agentName: agent.name, role: agent.role, yesterday: 'Completed assigned work', today: 'Working on new tasks', blockers: 'None' });
+      }
+    }
+
+    // CEO summarizes if AI enabled
+    let summary = '';
+    if (ceo?.aiConfig) {
+      try {
+        const cfg = ceo.aiConfig as any;
+        const standupText = rows.map(r => `${r.agentName} (${r.role}): Yesterday: ${r.yesterday}. Today: ${r.today}. Blockers: ${r.blockers}`).join('\n');
+        const prompt = `You are ${ceo.name}, CEO. Summarize this team standup in 2-3 sentences and list any action items:\n${standupText}`;
+        const res = await fetch((cfg.baseUrl ?? '').replace(/\/$/, '') + '/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.apiKey ?? ''}` },
+          body: JSON.stringify({ model: cfg.model, messages: [{ role: 'user', content: prompt }], max_tokens: 150 }),
+        });
+        const data = await res.json();
+        summary = data.choices?.[0]?.message?.content ?? '';
+      } catch { summary = 'CEO summary unavailable.'; }
+    }
+
+    const newLog: ScrumLog = { date: today, rows, summary };
+    const newLogs = [newLog, ...logs.slice(0, 9)];
+    setLogs(newLogs);
+    setActiveLog(newLog);
+    try { localStorage.setItem(LS_SCRUM, JSON.stringify(newLogs)); } catch {}
+    setRunning(false);
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%', overflowY: 'auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
         <div style={{ fontSize: '20px', color: '#66ddff', fontWeight: 'bold' }}>📅 Daily Standup — {today}</div>
-        <button style={{ padding: '10px 20px', fontFamily: 'monospace', fontSize: '19px', fontWeight: 'bold', background: '#0a1a0a', color: '#00ff88', border: '2px solid #00ff88', cursor: 'pointer' }}>▶ Run Scrum (AI)</button>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          {logs.length > 1 && (
+            <select onChange={e => setActiveLog(logs[parseInt(e.target.value)])} style={{ background: '#0a0a14', color: '#aaddff', border: '2px solid #334466', fontFamily: 'monospace', fontSize: '15px', padding: '6px' }}>
+              {logs.map((l, i) => <option key={i} value={i}>📅 {l.date}</option>)}
+            </select>
+          )}
+          <button onClick={runScrum} disabled={running || agents.length === 0} style={{ padding: '10px 20px', fontFamily: 'monospace', fontSize: '18px', fontWeight: 'bold', background: running ? '#0a0a0a' : '#0a1a0a', color: running ? '#334455' : '#00ff88', border: '2px solid', borderColor: running ? '#222233' : '#00ff88', cursor: running ? 'wait' : 'pointer' }}>
+            {running ? '⏳ Running Scrum...' : '▶ Run Scrum (AI)'}
+          </button>
+        </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr 1fr 1fr', gap: 2, background: '#0a0a18', border: '2px solid #223355' }}>
-        {['Agent', 'Yesterday', 'Today', 'Blockers'].map(h => (
-          <div key={h} style={{ padding: '12px 16px', fontSize: '20px', color: '#66ddff', fontWeight: 'bold', background: '#0a0a18', letterSpacing: 1, borderBottom: '2px solid #223355' }}>{h}</div>
-        ))}
-        {rows.map((e, i) => (
-          <>
-            <div key={`a${i}`} style={{ padding: '14px 16px', background: i % 2 === 0 ? '#0d0d1a' : '#0a0a16', borderRight: '1px solid #223355' }}>
-              <div style={{ fontSize: '22px', color: '#66ddff', fontWeight: 'bold' }}>{e.agentName}</div>
-              <div style={{ fontSize: '18px', color: '#88aacc', fontWeight: 'bold', marginTop: 4 }}>{e.role}</div>
+      {agents.length === 0 && <div style={{ color: '#667788', fontSize: '17px', padding: 20 }}>No agents hired. Hire agents to run scrum.</div>}
+
+      {activeLog && (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr 1fr 1fr', background: '#0a0a18', border: '2px solid #223355' }}>
+            {['Agent', 'Yesterday', 'Today', 'Blockers'].map(h => (
+              <div key={h} style={{ padding: '12px 16px', fontSize: '20px', color: '#66ddff', fontWeight: 'bold', background: '#0a0a18', borderBottom: '2px solid #223355' }}>{h}</div>
+            ))}
+            {activeLog.rows.map((e, i) => (
+              <>
+                <div key={`a${i}`} style={{ padding: '14px 16px', background: i % 2 === 0 ? '#0d0d1a' : '#0a0a16', borderRight: '1px solid #223355' }}>
+                  <div style={{ fontSize: '20px', color: '#66ddff', fontWeight: 'bold' }}>{e.agentName}</div>
+                  <div style={{ fontSize: '17px', color: '#88aacc', fontWeight: 'bold', marginTop: 4 }}>{e.role}</div>
+                </div>
+                <div key={`y${i}`} style={{ padding: '14px 16px', fontSize: '18px', color: '#99ccdd', background: i % 2 === 0 ? '#0d0d1a' : '#0a0a16', borderRight: '1px solid #223355', lineHeight: 1.6 }}>{e.yesterday}</div>
+                <div key={`t${i}`} style={{ padding: '14px 16px', fontSize: '18px', color: '#88ffbb', background: i % 2 === 0 ? '#0d0d1a' : '#0a0a16', borderRight: '1px solid #223355', lineHeight: 1.6 }}>{e.today}</div>
+                <div key={`b${i}`} style={{ padding: '14px 16px', fontSize: '20px', fontWeight: 'bold', color: e.blockers === 'None' ? '#55ccee' : '#ffaa44', background: i % 2 === 0 ? '#0d0d1a' : '#0a0a16', lineHeight: 1.6 }}>{e.blockers}</div>
+              </>
+            ))}
+          </div>
+
+          {activeLog.summary && (
+            <div style={{ background: '#0a1a0a', border: '2px solid #1a7a3a', padding: '16px' }}>
+              <div style={{ fontSize: '18px', color: '#ffd700', fontWeight: 'bold', marginBottom: 10 }}>👑 CEO Summary:</div>
+              <div style={{ fontSize: '17px', color: '#aaffaa', lineHeight: 1.7 }}>{activeLog.summary}</div>
             </div>
-            <div key={`y${i}`} style={{ padding: '14px 16px', fontSize: '18px', color: '#99ccdd', background: i % 2 === 0 ? '#0d0d1a' : '#0a0a16', borderRight: '1px solid #223355', lineHeight: 1.6 }}>{e.yesterday}</div>
-            <div key={`t${i}`} style={{ padding: '14px 16px', fontSize: '18px', color: '#88ffbb', background: i % 2 === 0 ? '#0d0d1a' : '#0a0a16', borderRight: '1px solid #223355', lineHeight: 1.6 }}>{e.today}</div>
-            <div key={`b${i}`} style={{ padding: '14px 16px', fontSize: '20px', fontWeight: 'bold', color: e.blockers === 'None' ? '#55ccee' : '#ffaa44', background: i % 2 === 0 ? '#0d0d1a' : '#0a0a16', lineHeight: 1.6 }}>{e.blockers}</div>
-          </>
-        ))}
-      </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -296,13 +552,15 @@ function TeamGrid({ agents, onChat }: { agents: HiredAgent[]; onChat?: (id: stri
 }
 
 export function CompanyDashboard({ agents, companyBalance, companyRevenue, onClose }: Props) {
-  const [tab, setTab] = useState<'tasks'|'folders'|'scrum'|'analytics'|'team'>('tasks');
+  const [tab, setTab] = useState<'tasks'|'folders'|'scrum'|'analytics'|'team'|'org'|'inbox'>('tasks');
   const tabs = [
     { key: 'tasks' as const, label: '📋 Task Board' },
     { key: 'folders' as const, label: '📁 Output Folders' },
     { key: 'scrum' as const, label: '🧑‍💼 Scrum' },
     { key: 'analytics' as const, label: '📈 Analytics' },
     { key: 'team' as const, label: '👥 Team' },
+    { key: 'org' as const, label: '🗂️ Org Chart' },
+    { key: 'inbox' as const, label: '👑 CEO Inbox' },
   ];
 
   return (
@@ -341,6 +599,8 @@ export function CompanyDashboard({ agents, companyBalance, companyRevenue, onClo
         {tab === 'scrum'     && <ScrumBoard agents={agents} />}
         {tab === 'analytics' && <Analytics agents={agents} companyBalance={companyBalance} companyRevenue={companyRevenue} />}
         {tab === 'team'      && <TeamGrid agents={agents} />}
+        {tab === 'org'       && <OrgChart agents={agents} />}
+        {tab === 'inbox'     && <CEOInbox agents={agents} />}
       </div>
     </div>
   );

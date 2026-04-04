@@ -17,6 +17,10 @@ interface BottomToolbarProps {
   onAPIClick?: () => void;
   onFinanceClick?: () => void;
   onMessagingClick?: () => void;
+  onReportsClick?: () => void;
+  onSuggestionsClick?: () => void;
+  onPriorityClick?: () => void;
+  onGameClick?: () => void;
   isEditMode: boolean;
   onToggleEditMode: () => void;
   isDebugMode: boolean;
@@ -365,6 +369,10 @@ export function BottomToolbar({
   onAPIClick,
   onFinanceClick,
   onMessagingClick,
+  onReportsClick,
+  onSuggestionsClick,
+  onPriorityClick,
+  onGameClick,
 }: BottomToolbarProps) {
   const [hovered, setHovered] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -650,6 +658,66 @@ export function BottomToolbar({
           title="Messaging (Telegram/WhatsApp)"
         >
           📱 Connect
+        </button>
+
+        {/* AI REPORTS button */}
+        <button
+          onClick={onReportsClick}
+          onMouseEnter={() => setHovered('reports')}
+          onMouseLeave={() => setHovered(null)}
+          style={{
+            ...btnBase,
+            background:
+              hovered === 'reports' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
+          }}
+          title="AI Reports"
+        >
+          🤖 Reports
+        </button>
+
+        {/* AI SUGGESTIONS button */}
+        <button
+          onClick={onSuggestionsClick}
+          onMouseEnter={() => setHovered('suggestions')}
+          onMouseLeave={() => setHovered(null)}
+          style={{
+            ...btnBase,
+            background:
+              hovered === 'suggestions' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
+          }}
+          title="AI Task Suggestions"
+        >
+          💡 Ideas
+        </button>
+
+        {/* AI PRIORITY button */}
+        <button
+          onClick={onPriorityClick}
+          onMouseEnter={() => setHovered('priority')}
+          onMouseLeave={() => setHovered(null)}
+          style={{
+            ...btnBase,
+            background:
+              hovered === 'priority' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
+          }}
+          title="AI Auto-Prioritization"
+        >
+          🎯 Priority
+        </button>
+
+        {/* GAME button */}
+        <button
+          onClick={onGameClick}
+          onMouseEnter={() => setHovered('game')}
+          onMouseLeave={() => setHovered(null)}
+          style={{
+            ...btnBase,
+            background:
+              hovered === 'game' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
+          }}
+          title="Game Mechanics"
+        >
+          🎮 Game
         </button>
 
         <div style={{ position: 'relative' }}>

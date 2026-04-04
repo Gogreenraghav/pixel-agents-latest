@@ -4,6 +4,24 @@ import { BottomToolbar } from './components/BottomToolbar.js';
 import { StatsDashboard, ROLE_SALARY } from './components/StatsDashboard.js';
 import { useOfficeEvents, EventBanner } from './components/OfficeEvents.js';
 import { AgentChatPanel } from './components/AgentChatPanel.js';
+import { AgentTooltip } from './components/AgentTooltip.js';
+import { AgentMemoryViewer } from './components/AgentMemoryViewer.js';
+import { GroupChat } from './components/GroupChat.js';
+import { WebhookSettings } from './components/WebhookSettings.js';
+import { APISettings } from './components/APISettings.js';
+import { FinancePanel } from './components/FinancePanel.js';
+import { MessagingSettings } from './components/MessagingSettings.js';
+import { AIReports } from './components/AIReports.js';
+import { AITaskSuggestions } from './components/AITaskSuggestions.js';
+import { AIAutoPriority } from './components/AIAutoPriority.js';
+import { GameMechanics } from './components/GameMechanics.js';
+import { EmailSettings } from './components/EmailSettings.js';
+import { Unlockables } from './components/Unlockables.js';
+import { Leaderboard } from './components/Leaderboard.js';
+import { FloorManager } from './components/FloorManager.js';
+
+// @ts-ignore - prevent tree-shaking
+window.__FLOOR_MANAGER__ = FloorManager;
 import { CompanyDashboard } from './components/CompanyDashboard.js';
 import { SchedulePanel, getCurrentSlot, slotToAgentState } from './components/SchedulePanel.js';
 import type { DaySchedule } from './components/SchedulePanel.js';
@@ -236,13 +254,14 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
 
 const LEVEL_NAMES = ['Junior', 'Mid', 'Senior', 'Lead', 'Principal'];
 
-function AgentDetailPanel({ agent, onClose, onFire, onPromote, onDemote, onChat }: {
+function AgentDetailPanel({ agent, onClose, onFire, onPromote, onDemote, onChat, onMemory }: {
   agent: HiredAgent;
   onClose: () => void;
   onFire: (id: string) => void;
   onPromote: (id: string) => void;
   onDemote: (id: string) => void;
   onChat?: (id: string) => void;
+  onMemory?: (id: string) => void;
 }) {
   const [confirmFire, setConfirmFire] = useState(false);
   const levelName = LEVEL_NAMES[(agent.level ?? 1) - 1] ?? 'Junior';
@@ -312,9 +331,12 @@ function AgentDetailPanel({ agent, onClose, onFire, onPromote, onDemote, onChat 
         {/* Promote / Demote */}
         {agent.aiConfig && onChat && (
           <button onClick={() => onChat(agent.id)} style={{
-            ...btnStyle, width: '100%', marginTop: 10, marginBottom: -4, background: '#0a0a14', color: '#aaccff', borderColor: '#334466'
+            ...btnStyle, width: '100%', marginTop: 10, marginBottom: 4, background: '#0a0a14', color: '#aaccff', borderColor: '#334466'
           }}>💬 Chat with Agent</button>
         )}
+        <button onClick={() => onMemory?.(agent.id)} style={{
+          ...btnStyle, width: '100%', marginTop: 0, marginBottom: -4, background: '#0a1a0a', color: '#44ffaa', borderColor: '#226644'
+        }}>🧠 View Memory & Skills</button>
         <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
           <button
             onClick={() => onPromote(agent.id)}
@@ -508,6 +530,20 @@ function App() {
   const [currentFloor, setCurrentFloor] = useState(isNaN(urlFloorParam) ? 0 : urlFloorParam);
   const [statsOpen, setStatsOpen] = useState(false);
   const [chatAgentId, setChatAgentId] = useState<string | null>(null);
+  const [groupChatOpen, setGroupChatOpen] = useState(false);
+  const [webhookOpen, setWebhookOpen] = useState(false);
+  const [apiOpen, setApiOpen] = useState(false);
+  const [financeOpen, setFinanceOpen] = useState(false);
+  const [messagingOpen, setMessagingOpen] = useState(false);
+  const [reportsOpen, setReportsOpen] = useState(false);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [priorityOpen, setPriorityOpen] = useState(false);
+  const [gameOpen, setGameOpen] = useState(false);
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [unlockOpen, setUnlockOpen] = useState(false);
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
+  const [floorOpen, setFloorOpen] = useState(false);
+  const [memoryAgentId, setMemoryAgentId] = useState<string | null>(null);
   const [dashboardOpen, setDashboardOpen] = useState(false);
   const [hireHistory, setHireHistory] = useState<HireHistoryEntry[]>(() => loadHistoryFromStorage());
   // ── Game Economy ─────────────────────────────────────────────────────────
@@ -1014,7 +1050,84 @@ function App() {
           onClose={() => setSelectedHiredId(null)}
           onFire={handleFireAgent}
           onChat={(id) => { setSelectedHiredId(null); setChatAgentId(id); }}
+          onMemory={(id) => { setSelectedHiredId(null); setMemoryAgentId(id); }}
         />
+      )}
+
+      {/* Memory Viewer */}
+      {memoryAgentId && (() => {
+        const a = hiredAgents.find(x => x.id === memoryAgentId);
+        if (!a) return null;
+        return <AgentMemoryViewer agentId={a.id} agentName={a.name} agentRole={a.role} onClose={() => setMemoryAgentId(null)} />;
+      })()}
+
+      {/* Group Chat */}
+      {groupChatOpen && (
+        <GroupChat
+          agents={hiredAgents}
+          ceoName={hiredAgents.find(a => a.role === 'CEO')?.name ?? 'CEO'}
+          onClose={() => setGroupChatOpen(false)}
+        />
+      )}
+
+      {/* Webhook Settings */}
+      {webhookOpen && (
+        <WebhookSettings onClose={() => setWebhookOpen(false)} />
+      )}
+
+      {/* API Settings */}
+      {apiOpen && (
+        <APISettings onClose={() => setApiOpen(false)} />
+      )}
+
+      {/* Finance Panel */}
+      {financeOpen && (
+        <FinancePanel onClose={() => setFinanceOpen(false)} />
+      )}
+
+      {/* Messaging Settings */}
+      {messagingOpen && (
+        <MessagingSettings onClose={() => setMessagingOpen(false)} />
+      )}
+
+      {/* AI Reports */}
+      {reportsOpen && (
+        <AIReports onClose={() => setReportsOpen(false)} />
+      )}
+
+      {/* AI Task Suggestions */}
+      {suggestionsOpen && (
+        <AITaskSuggestions onClose={() => setSuggestionsOpen(false)} />
+      )}
+
+      {/* AI Auto Priority */}
+      {priorityOpen && (
+        <AIAutoPriority onClose={() => setPriorityOpen(false)} />
+      )}
+
+      {/* Game Mechanics */}
+      {gameOpen && (
+        <GameMechanics onClose={() => setGameOpen(false)} />
+      )}
+
+      {/* Email Settings */}
+      {emailOpen && (
+        <EmailSettings onClose={() => setEmailOpen(false)} />
+      )}
+
+      {/* Unlockables Shop */}
+      {unlockOpen && (
+        <Unlockables onClose={() => setUnlockOpen(false)} />
+      )}
+
+      {/* Leaderboard */}
+      {leaderboardOpen && (
+        <Leaderboard onClose={() => setLeaderboardOpen(false)} />
+      )}
+
+      {/* Floor Manager */}
+      {floorOpen && (
+        <FloorManager onClose={() => setFloorOpen(false)} />
       )}
 
       {!isEmbedMode && statsOpen && <StatsDashboard agents={hiredAgents} currentFloor={currentFloor} onClose={() => setStatsOpen(false)} onPromote={handlePromoteAgent} onFire={handleFireAgent} activeEvent={activeEvent} eventLog={eventLog} onTriggerEvent={triggerEvent} eventTemplates={EVENT_TEMPLATES} autoEvents={autoEvents} companyBalance={companyBalance} companyRevenue={monthlyRevenue} deptBudgets={deptBudgets} onDeptBudgetChange={handleDeptBudgetChange} hireHistory={hireHistory} onAutoEventsChange={setAutoEvents} />}
@@ -1048,6 +1161,7 @@ function App() {
         </div>
       )}
       {!isEmbedMode && <BottomToolbar
+        className="bottom-toolbar"
         isEditMode={editor.isEditMode}
         onToggleEditMode={editor.handleToggleEditMode}
         isDebugMode={isDebugMode}
@@ -1063,6 +1177,19 @@ function App() {
         statsOpen={statsOpen}
         onScheduleClick={() => setScheduleOpen(v => !v)}
         scheduleOpen={scheduleOpen}
+        onGroupChatClick={() => setGroupChatOpen(v => !v)}
+        onWebhookClick={() => setWebhookOpen(v => !v)}
+        onAPIClick={() => setApiOpen(v => !v)}
+        onFinanceClick={() => setFinanceOpen(v => !v)}
+        onMessagingClick={() => setMessagingOpen(v => !v)}
+        onReportsClick={() => setReportsOpen(v => !v)}
+        onSuggestionsClick={() => setSuggestionsOpen(v => !v)}
+        onPriorityClick={() => setPriorityOpen(v => !v)}
+        onGameClick={() => setGameOpen(v => !v)}
+        onEmailClick={() => setEmailOpen(v => !v)}
+        onUnlockClick={() => setUnlockOpen(v => !v)}
+        onLeaderboardClick={() => setLeaderboardOpen(v => !v)}
+        onFloorClick={() => setFloorOpen(v => !v)}
         onDashboardClick={() => setDashboardOpen(v => !v)}
       /> }
 
@@ -1132,6 +1259,17 @@ function App() {
           panRef={editor.panRef}
           onCloseAgent={handleCloseAgent}
           alwaysShowOverlay={alwaysShowOverlay}
+        />
+      )}
+
+      {/* Agent Tooltip - shows on hover */}
+      {!isDebugMode && (
+        <AgentTooltip
+          officeState={officeState}
+          agents={hiredAgents}
+          containerRef={containerRef}
+          zoom={editor.zoom}
+          panRef={editor.panRef}
         />
       )}
 

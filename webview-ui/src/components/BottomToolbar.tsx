@@ -12,6 +12,11 @@ interface BottomToolbarProps {
   onScheduleClick?: () => void;
   scheduleOpen?: boolean;
   onDashboardClick?: () => void;
+  onGroupChatClick?: () => void;
+  onWebhookClick?: () => void;
+  onAPIClick?: () => void;
+  onFinanceClick?: () => void;
+  onMessagingClick?: () => void;
   isEditMode: boolean;
   onToggleEditMode: () => void;
   isDebugMode: boolean;
@@ -355,6 +360,11 @@ export function BottomToolbar({
   onScheduleClick,
   scheduleOpen,
   onDashboardClick,
+  onGroupChatClick,
+  onWebhookClick,
+  onAPIClick,
+  onFinanceClick,
+  onMessagingClick,
 }: BottomToolbarProps) {
   const [hovered, setHovered] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -450,6 +460,20 @@ export function BottomToolbar({
           title="Company Dashboard"
         >
           🏢 Dashboard
+        </button>
+
+        {/* GROUP CHAT button */}
+        <button
+          onClick={onGroupChatClick}
+          onMouseEnter={() => setHovered('groupchat')}
+          onMouseLeave={() => setHovered(null)}
+          style={{
+            ...btnBase,
+            background: hovered === 'groupchat' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
+          }}
+          title="Team Group Chat"
+        >
+          💬 Chat
         </button>
 
         {/* SCHEDULE button */}
@@ -567,6 +591,67 @@ export function BottomToolbar({
         >
           Layout
         </button>
+
+        {/* WEBHOOK button */}
+        <button
+          onClick={onWebhookClick}
+          onMouseEnter={() => setHovered('webhook')}
+          onMouseLeave={() => setHovered(null)}
+          style={{
+            ...btnBase,
+            background:
+              hovered === 'webhook' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
+          }}
+          title="Webhook Settings"
+        >
+          🔗 Webhooks
+        </button>
+
+        {/* API button */}
+        <button
+          onClick={onAPIClick}
+          onMouseEnter={() => setHovered('api')}
+          onMouseLeave={() => setHovered(null)}
+          style={{
+            ...btnBase,
+            background:
+              hovered === 'api' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
+          }}
+          title="API Endpoints"
+        >
+          🌐 API
+        </button>
+
+        {/* FINANCE button */}
+        <button
+          onClick={onFinanceClick}
+          onMouseEnter={() => setHovered('finance')}
+          onMouseLeave={() => setHovered(null)}
+          style={{
+            ...btnBase,
+            background:
+              hovered === 'finance' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
+          }}
+          title="Finance Dashboard"
+        >
+          📊 Finance
+        </button>
+
+        {/* MESSAGING button */}
+        <button
+          onClick={onMessagingClick}
+          onMouseEnter={() => setHovered('messaging')}
+          onMouseLeave={() => setHovered(null)}
+          style={{
+            ...btnBase,
+            background:
+              hovered === 'messaging' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
+          }}
+          title="Messaging (Telegram/WhatsApp)"
+        >
+          📱 Connect
+        </button>
+
         <div style={{ position: 'relative' }}>
           <button
             onClick={() => setIsSettingsOpen((v) => !v)}

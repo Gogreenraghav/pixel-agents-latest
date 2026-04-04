@@ -32,6 +32,10 @@ interface BottomToolbarProps {
   onToggleDebugMode: () => void;
   alwaysShowOverlay: boolean;
   onToggleAlwaysShowOverlay: () => void;
+  soundEnabled?: boolean;
+  onToggleSound?: () => void;
+  speedBoost?: number;
+  onToggleSpeedBoost?: () => void;
   workspaceFolders: WorkspaceFolder[];
   externalAssetDirectories: string[];
 }
@@ -361,6 +365,10 @@ export function BottomToolbar({
   onToggleDebugMode,
   alwaysShowOverlay,
   onToggleAlwaysShowOverlay,
+  soundEnabled = true,
+  onToggleSound,
+  speedBoost = 1,
+  onToggleSpeedBoost,
   externalAssetDirectories,
   onHireAgent,
   currentFloor = 0,
@@ -390,6 +398,7 @@ export function BottomToolbar({
   const [isBypassMenuOpen, setIsBypassMenuOpen] = useState(false);
   const [isHireOpen, setIsHireOpen] = useState(false);
   const [isFloorOpen, setIsFloorOpen] = useState(false);
+  const [isMoreOpen, setIsMoreOpen] = useState(false);
   const folderPickerRef = useRef<HTMLDivElement>(null);
 
   // Close folder picker / bypass menu on outside click
@@ -593,23 +602,6 @@ export function BottomToolbar({
           ⊞ All Floors
         </button>
 
-        <button
-          onClick={onToggleEditMode}
-          onMouseEnter={() => setHovered('edit')}
-          onMouseLeave={() => setHovered(null)}
-          style={
-            isEditMode
-              ? { ...btnActive }
-              : {
-                  ...btnBase,
-                  background: hovered === 'edit' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
-                }
-          }
-          title="Edit office layout"
-        >
-          Layout
-        </button>
-
         {/* WEBHOOK button */}
         <button
           onClick={onWebhookClick}
@@ -715,21 +707,6 @@ export function BottomToolbar({
           🎯 Priority
         </button>
 
-        {/* GAME button */}
-        <button
-          onClick={onGameClick}
-          onMouseEnter={() => setHovered('game')}
-          onMouseLeave={() => setHovered(null)}
-          style={{
-            ...btnBase,
-            background:
-              hovered === 'game' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
-          }}
-          title="Game Mechanics"
-        >
-          🎮 Game
-        </button>
-
         {/* EMAIL button */}
         <button
           onClick={onEmailClick}
@@ -745,35 +722,99 @@ export function BottomToolbar({
           📧 Email
         </button>
 
-        {/* UNLOCK button */}
-        <button
-          onClick={onUnlockClick}
-          onMouseEnter={() => setHovered('unlock')}
-          onMouseLeave={() => setHovered(null)}
-          style={{
-            ...btnBase,
-            background:
-              hovered === 'unlock' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
-          }}
-          title="Unlockables Shop"
-        >
-          🎁 Shop
-        </button>
-
-        {/* LEADERBOARD button */}
-        <button
-          onClick={onLeaderboardClick}
-          onMouseEnter={() => setHovered('leaderboard')}
-          onMouseLeave={() => setHovered(null)}
-          style={{
-            ...btnBase,
-            background:
-              hovered === 'leaderboard' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
-          }}
-          title="Global Leaderboard"
-        >
-          🏆 Rank
-        </button>
+        {/* MORE DROPDOWN - Game + Shop + Rank combined */}
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={() => setIsMoreOpen(v => !v)}
+            onMouseEnter={() => setHovered('more')}
+            onMouseLeave={() => setHovered(null)}
+            style={{
+              ...btnBase,
+              background:
+                isMoreOpen || hovered === 'more' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
+            }}
+            title="More Options: Game, Shop, Rank"
+          >
+            🎁 More
+          </button>
+          {isMoreOpen && (
+            <div style={{
+              position: 'absolute',
+              bottom: '100%',
+              right: 0,
+              marginBottom: 4,
+              background: 'var(--pixel-bg)',
+              border: '2px solid var(--pixel-border)',
+              borderRadius: 0,
+              boxShadow: 'var(--pixel-shadow)',
+              minWidth: 160,
+              zIndex: 'var(--pixel-controls-z)',
+            }}>
+              <button
+                onClick={() => { onGameClick?.(); setIsMoreOpen(false); }}
+                onMouseEnter={() => setHovered('more-game')}
+                onMouseLeave={() => setHovered(null)}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  textAlign: 'left',
+                  padding: '8px 12px',
+                  fontSize: '18px',
+                  color: 'var(--pixel-text)',
+                  background: hovered === 'more-game' ? 'var(--pixel-btn-hover-bg)' : 'transparent',
+                  border: 'none',
+                  borderBottom: '1px solid var(--pixel-border)',
+                  borderRadius: 0,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                🎮 Game
+              </button>
+              <button
+                onClick={() => { onUnlockClick?.(); setIsMoreOpen(false); }}
+                onMouseEnter={() => setHovered('more-shop')}
+                onMouseLeave={() => setHovered(null)}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  textAlign: 'left',
+                  padding: '8px 12px',
+                  fontSize: '18px',
+                  color: 'var(--pixel-text)',
+                  background: hovered === 'more-shop' ? 'var(--pixel-btn-hover-bg)' : 'transparent',
+                  border: 'none',
+                  borderBottom: '1px solid var(--pixel-border)',
+                  borderRadius: 0,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                🎁 Shop
+              </button>
+              <button
+                onClick={() => { onLeaderboardClick?.(); setIsMoreOpen(false); }}
+                onMouseEnter={() => setHovered('more-rank')}
+                onMouseLeave={() => setHovered(null)}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  textAlign: 'left',
+                  padding: '8px 12px',
+                  fontSize: '18px',
+                  color: 'var(--pixel-text)',
+                  background: hovered === 'more-rank' ? 'var(--pixel-btn-hover-bg)' : 'transparent',
+                  border: 'none',
+                  borderRadius: 0,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                🏆 Rank
+              </button>
+            </div>
+          )}
+        </div>
 
         {/* FLOOR button */}
         <button
@@ -792,6 +833,59 @@ export function BottomToolbar({
 
         <div style={{ position: 'relative' }}>
           <button
+            onClick={onToggleEditMode}
+            onMouseEnter={() => setHovered('edit')}
+            onMouseLeave={() => setHovered(null)}
+            style={
+              isEditMode
+                ? { ...btnActive }
+                : {
+                    ...btnBase,
+                    background: hovered === 'edit' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
+                  }
+            }
+            title="Edit office layout"
+          >
+            Layout
+          </button>
+        </div>
+
+        {/* Speed Boost */}
+        <button
+          onClick={onToggleSpeedBoost}
+          onMouseEnter={() => setHovered('speed')}
+          onMouseLeave={() => setHovered(null)}
+          style={{
+            ...btnBase,
+            padding: '5px 8px',
+            fontSize: '20px',
+            color: speedBoost > 1 ? '#ffdd44' : '#888',
+            background: hovered === 'speed' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
+          }}
+          title={speedBoost > 1 ? `Speed: ${speedBoost}x (click to normal)` : 'Speed Boost: 2x'}
+        >
+          ⚡{speedBoost > 1 ? `${speedBoost}x` : ''}
+        </button>
+
+        {/* Sound Toggle */}
+        <button
+          onClick={onToggleSound}
+          onMouseEnter={() => setHovered('sound')}
+          onMouseLeave={() => setHovered(null)}
+          style={{
+            ...btnBase,
+            padding: '5px 8px',
+            fontSize: '20px',
+            color: soundEnabled ? '#00ff88' : '#ff6666',
+            background: hovered === 'sound' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
+          }}
+          title={soundEnabled ? 'Sound On' : 'Sound Off'}
+        >
+          {soundEnabled ? '🔊' : '🔇'}
+        </button>
+
+        <div style={{ position: 'relative' }}>
+          <button
             onClick={() => setIsSettingsOpen((v) => !v)}
             onMouseEnter={() => setHovered('settings')}
             onMouseLeave={() => setHovered(null)}
@@ -806,7 +900,7 @@ export function BottomToolbar({
             }
             title="Settings"
           >
-            Settings
+            ⚙️ Settings
           </button>
           <SettingsModal
             isOpen={isSettingsOpen}

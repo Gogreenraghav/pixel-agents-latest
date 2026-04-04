@@ -4,6 +4,7 @@ import type { WorkspaceFolder } from '../hooks/useExtensionMessages.js';
 import { SettingsModal } from './SettingsModal.js';
 
 interface BottomToolbarProps {
+  className?: string;
   onHireAgent?: (name: string, role: string, dept: string, salary: number, currency: string, country: string, aiConfig?: any) => void;
   currentFloor?: number;
   onFloorChange?: (floor: number) => void;
@@ -21,6 +22,10 @@ interface BottomToolbarProps {
   onSuggestionsClick?: () => void;
   onPriorityClick?: () => void;
   onGameClick?: () => void;
+  onEmailClick?: () => void;
+  onUnlockClick?: () => void;
+  onLeaderboardClick?: () => void;
+  onFloorClick?: () => void;
   isEditMode: boolean;
   onToggleEditMode: () => void;
   isDebugMode: boolean;
@@ -349,6 +354,7 @@ function HireDialog({ onClose, onHire }: { onClose: () => void; onHire: (name: s
 }
 
 export function BottomToolbar({
+  className,
   isEditMode,
   onToggleEditMode,
   isDebugMode,
@@ -373,6 +379,10 @@ export function BottomToolbar({
   onSuggestionsClick,
   onPriorityClick,
   onGameClick,
+  onEmailClick,
+  onUnlockClick,
+  onLeaderboardClick,
+  onFloorClick,
 }: BottomToolbarProps) {
   const [hovered, setHovered] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -407,7 +417,7 @@ export function BottomToolbar({
 
   return (
     <>
-      <div style={panelStyle}>
+      <div className={className} style={panelStyle}>
 
         {/* HIRE AGENT button */}
         <div style={{ position: 'relative' }}>
@@ -718,6 +728,66 @@ export function BottomToolbar({
           title="Game Mechanics"
         >
           🎮 Game
+        </button>
+
+        {/* EMAIL button */}
+        <button
+          onClick={onEmailClick}
+          onMouseEnter={() => setHovered('email')}
+          onMouseLeave={() => setHovered(null)}
+          style={{
+            ...btnBase,
+            background:
+              hovered === 'email' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
+          }}
+          title="Email Integration"
+        >
+          📧 Email
+        </button>
+
+        {/* UNLOCK button */}
+        <button
+          onClick={onUnlockClick}
+          onMouseEnter={() => setHovered('unlock')}
+          onMouseLeave={() => setHovered(null)}
+          style={{
+            ...btnBase,
+            background:
+              hovered === 'unlock' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
+          }}
+          title="Unlockables Shop"
+        >
+          🎁 Shop
+        </button>
+
+        {/* LEADERBOARD button */}
+        <button
+          onClick={onLeaderboardClick}
+          onMouseEnter={() => setHovered('leaderboard')}
+          onMouseLeave={() => setHovered(null)}
+          style={{
+            ...btnBase,
+            background:
+              hovered === 'leaderboard' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
+          }}
+          title="Global Leaderboard"
+        >
+          🏆 Rank
+        </button>
+
+        {/* FLOOR button */}
+        <button
+          onClick={onFloorClick}
+          onMouseEnter={() => setHovered('floor')}
+          onMouseLeave={() => setHovered(null)}
+          style={{
+            ...btnBase,
+            background:
+              hovered === 'floor' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
+          }}
+          title="4-Floor Building"
+        >
+          🏗️ Floors
         </button>
 
         <div style={{ position: 'relative' }}>
